@@ -22,6 +22,31 @@ local socket = require("socket")
 local host, port = "localhost", 65432
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+RAM_HIGH_BANK = 0x10000
+
+memory.usememorydomain("WRAM")
+
+--console.write(memory.getcurrentmemorydomain())
+
+
+
+
+
+
+
+
 ButtonNames = {
 	"A",
 	"B",
@@ -306,7 +331,7 @@ while true do
 			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x36))
 
 			-- ghost enable
-			g_enable = memory.readbyte(0x7fff02)
+			g_enable = memory.readbyte(RAM_HIGH_BANK + 0xff02)
 			if g_enable == 0 then
 				if memory.readbyte(0x11c1) > 0x84 then
 					g_enable = 2
@@ -560,7 +585,7 @@ while true do
 				num_tiles = 0
 
 				for i=0,0x3fff do
-					local tile = memory.readbyte(0x7f0000 + i)
+					local tile = memory.readbyte(RAM_HIGH_BANK + i)
 					if tile >= 0xc0 then
 						overlay_data = overlay_data .. string.format("%02x", i % 256)
 						overlay_data = overlay_data .. string.format("%02x", (i / 256) % 256)

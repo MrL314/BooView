@@ -65,11 +65,40 @@ SQRT_2 = 2 ** 0.5
 
 
 
-fps = config["fps"]
+
 
 width = config["window_width"]
 height = config["window_height"]
 
+
+
+
+MAP_NAMES = [
+	"MC3",
+	"GV2",
+	"DP2",
+	"BC2",
+	"VL2",
+	"RR",
+	"KB2",
+	"MC1",
+	"GV3",
+	"BC3",
+	"CI2",
+	"DP3",
+	"VL1",
+	"KB1",
+	"MC4",
+	"MC2",
+	"GV1",
+	"BC1",
+	"CI1",
+	"DP1",
+	"BT3",
+	"BT4",
+	"BT1",
+	"BT2"
+]
 
 
 SIDE_FRAME_WIDTH = 100
@@ -228,7 +257,7 @@ def setup_map(map_name):
 	'''
 	full_map = map_cp.copy()
 	full_map.blit(dir_screen, (0, 0))
-	arrow_img = pygame.transform.scale(pygame.image.load('assets/' + config["sprite"] + '.png'), (width//64, height//64))
+	#arrow_img = pygame.transform.scale(pygame.image.load('assets/' + config["sprite"] + '.png'), (width//64, height//64))
 
 
 	scl = map_img.get_width()/map_screen.get_width()
@@ -430,7 +459,7 @@ ANIM_TIMER = 0
 ANIM_TIMER_SWAP = 15
 
 
-FRAME_SKIP = 0
+FRAME_SKIP = config["FRAME_SKIP"]
 
 FRAME_NUMBER = 0
 
@@ -582,8 +611,8 @@ while True:
 
 
 				done = False
-				show_checkpoints = config['show_checkpoints']
-				show_directions = config['show_directions']
+				show_checkpoints = False
+				show_directions = False
 
 
 
@@ -1018,7 +1047,7 @@ while True:
 								current_track_number = next_byte(ch_bytes)
 
 								if current_track_number != prev_track_number:
-									setup_map(config["map_names"][current_track_number])
+									setup_map(MAP_NAMES[current_track_number])
 
 									for i in range(8):
 										OBJECTS[i].reset_trail()
