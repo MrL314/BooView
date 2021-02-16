@@ -951,6 +951,7 @@ while True:
 								SHOW_GHOST = True
 							else:
 								SHOW_GHOST = False
+								RECORD_MODE = False
 								REPLAY_BUTTON.config(state="disabled")
 
 								#print("HERE")
@@ -969,6 +970,9 @@ while True:
 									
 									FOLLOW_BUTTONS[i].config(image=Assets.EMPTY_TK)
 									FOLLOW_BUTTONS[i].config(state="disabled")
+
+								REPLAY_BUTTON.config(state="disabled")
+								RECORD_MODE = False
 
 								CANVAS.blit(BG, (0, 0))
 								conn.send(b"FRAME\n")
