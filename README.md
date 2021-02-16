@@ -42,6 +42,27 @@ If the script is already loaded in the console, all you need to do is step 5 and
 
 
 
+## Special Notes
+###### SMKWorkshop Discord
+If you are interested in updates to this project, or Super Mario Kart in general, come join the 
+Super Mario Kart Workshop Discord!
+	https://discord.gg/QNcKNQC
+
+
+###### MrL's Patreon:
+This program is provided completely free of charge, at no cost to the user. However, it has been
+brought to my attention that some people would like to donate in order to support me in my efforts
+in making more -- as well as better -- tools for the community as a whole. If this applies to you, 
+donate via the link below. 10% of all proceeds earned through that donation link will go towards 
+the Autistic Self Advocacy Network, a charity devoted to the betterment of autistic and disabled
+individuals.
+ 
+Patreon:
+	https://www.patreon.com/MrL314 
+
+
+
+
 ## GNU License
 BooView is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
