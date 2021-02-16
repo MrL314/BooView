@@ -28,7 +28,7 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
 
 ## How to run
 
-1. Open BizHawk and load a Super Mario Kart rom
+1. Open BizHawk (**EmuHawk.exe**) and load a Super Mario Kart rom
    - Version should not matter
 2. In BizHawk, go to **Tools > Lua Console**
 3. In the Lua Console, go to **Script > Open Script**
