@@ -12,7 +12,7 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
 1. Bizhawk 2.3 or above (http://tasvideos.org/BizHawk.html)
    - Run the prereq installer before installing if on Windows
 
-If running from raw source code, make sure to use Python 3.6 (higher versions may not work properly), and run SETUP.bat
+If running from raw source code, make sure to use Python 3.6 (higher versions may not work properly), and run `SETUP.bat`
 
 ## Installation
 
