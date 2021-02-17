@@ -42,7 +42,7 @@ If the script is already loaded in the console, all you need to do is step 5 and
 
 ## Config Options
 
-If you are having framerate issues, considering editting the options in the **config.json** file. A few issues come from the screen size for the rendered window, so you can adjust the window size and the amount of frame skipping. `window_size` will determine the size of the render window, and `frame_skip` will determine the amount of frames to wait between renders and polling the Lua script
+If you are having framerate issues, considering editting the options in the **config.json** file. A few issues come from the screen size for the rendered window, so you can adjust the window size and the amount of frame skipping. `window_size` will determine the size of the render window, and `FRAME_SKIP` will determine the amount of frames to wait between renders and polling the Lua script
 
 
 ## Special Notes
