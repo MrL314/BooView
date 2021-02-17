@@ -9,19 +9,17 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
 
 ## Requirements: 
 
-1. Python 3.6 or above (https://www.python.org/downloads/)
-2. Bizhawk 2.3 or above (http://tasvideos.org/BizHawk.html)
+1. Bizhawk 2.3 or above (http://tasvideos.org/BizHawk.html)
    - Run the prereq installer before installing if on Windows
 
+If running from raw source code, make sure to use Pyhton 3.6 (higher versions may not work properly), and run SETUP.bat
 
 ## Installation
 
-1. Install Python 3.6 (**Later versions of python will not work properly**) 
-   - Make sure that you select **Add Python 3._x_ to PATH**
-2. Download BizHawk 2.3 or above
-3. (If on Windows) Download and run the Bizhawk Prereq installer
-4. Install BizHawk
-5. Download **BooView** from link above and unzip
+1. Download BizHawk 2.3 or above
+2. (If on Windows) Download and run the Bizhawk Prereq installer
+3. Install BizHawk
+4. Download **BooView** from link above and unzip
 
 
 
@@ -36,6 +34,7 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
    - This will load the script into the console.
 5. Run **BooView.bat**
    - Wait a few seconds until the welcome message appears
+   - If running from raw source, run `python BooView.py`
 7. In the Lua Console, double click on the red square next to **LuaSide**
 
 If the script is already loaded in the console, all you need to do is step 5 and 6.
@@ -43,7 +42,7 @@ If the script is already loaded in the console, all you need to do is step 5 and
 
 ## Config Options
 
-If you are having framerate issues, considering editting the options in the **config.json** file. A few issues come from the screen size for the rendered window, so you can adjust the window size and the amount of frame skipping. WINDOW_SIZE will determine the size of the render window, and FRAME_SKIP will determine the amount of frames to wait between renders and polling the Lua script
+If you are having framerate issues, considering editting the options in the **config.json** file. A few issues come from the screen size for the rendered window, so you can adjust the window size and the amount of frame skipping. `window_size` will determine the size of the render window, and `frame_skip` will determine the amount of frames to wait between renders and polling the Lua script
 
 
 ## Special Notes
