@@ -16,13 +16,12 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
 
 ## Installation
 
-1. Install Python 3.6 (or above)
+1. Install Python 3.6 (**Later versions of python will not work properly**) 
    - Make sure that you select **Add Python 3._x_ to PATH**
 2. Download BizHawk 2.3 or above
 3. (If on Windows) Download and run the Bizhawk Prereq installer
 4. Install BizHawk
 5. Download **BooView** from link above and unzip
-6. Run **SETUP.bat**
 
 
 
@@ -36,7 +35,8 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
    - This should freeze the emulator for a few seconds, then resume after.
    - This will load the script into the console.
 5. Run **BooView.bat**
-6. In the Lua Console, double click on the red square next to **LuaSide**
+   - Wait a few seconds until the welcome message appears
+7. In the Lua Console, double click on the red square next to **LuaSide**
 
 If the script is already loaded in the console, all you need to do is step 5 and 6.
 
