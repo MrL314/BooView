@@ -27,6 +27,8 @@ from tkinter import *
 import platform
 
 
+if False:
+	import pygame._view
 
 
 #HOST = '127.0.0.1'
@@ -574,6 +576,7 @@ while True:
 				conn.send(b"FRAME\n")
 
 
+				
 
 
 
@@ -591,18 +594,19 @@ while True:
 				if platform.system == "Windows":
 					os.environ['SDL_VIDEODRIVER'] = 'windib'
 
+			
 
 				root.title("BooView")
 				root.iconphoto(False, PhotoImage(file='assets/icon.png'))
 
 				pygame.init()
 
+				
 
-
-				font = pygame.font.Font(pygame.font.get_default_font(), 12)
+				font = pygame.font.Font("./assets/freesansbold.ttf", 12)
 
 				#clock = pygame.time.Clock()
-
+				
 				setup_map("MC3")
 
 				
@@ -617,7 +621,7 @@ while True:
 
 
 
-
+				
 
 				# ============================ Tkinter setup stuff ================================
 
@@ -718,7 +722,7 @@ while True:
 
 
 
-
+				
 
 
 				# main loop
