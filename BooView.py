@@ -69,8 +69,8 @@ SQRT_2 = 2 ** 0.5
 
 
 
-width = config["window_width"]
-height = config["window_height"]
+width = config["window_size"]
+height = config["window_size"]
 
 
 

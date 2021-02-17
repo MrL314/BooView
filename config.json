@@ -1,5 +1,4 @@
 {
-	"window_width": 512,
-	"window_height": 512,
+	"window_size": 512,
 	"FRAME_SKIP": 0
 }
