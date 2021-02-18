@@ -9,14 +9,15 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
 
 ## Requirements: 
 
-1. Bizhawk 2.3 or above (http://tasvideos.org/BizHawk.html)
+1. Bizhawk **2.3** (http://tasvideos.org/BizHawk.html)
    - Run the prereq installer before installing if on Windows
+   - **MAKE SURE it's version 2.3**
 
 If running from raw source code, make sure to use Python 3.6 (higher versions may not work properly), and run `SETUP.bat`
 
 ## Installation
 
-1. Download BizHawk 2.3 or above
+1. Download BizHawk **2.3**
 2. (If on Windows) Download and run the Bizhawk Prereq installer
 3. Install BizHawk
 4. Download **BooView** from link above and unzip
@@ -45,7 +46,13 @@ If the script is already loaded in the console, all you need to do is step 5 and
 If you are having framerate issues, considering editting the options in the **config.json** file. A few issues come from the screen size for the rendered window, so you can adjust the window size and the amount of frame skipping. `window_size` will determine the size of the render window, and `FRAME_SKIP` will determine the amount of frames to wait between renders and polling the Lua script
 
 
+
+
 ## Special Notes
+###### Crashes and Errors
+There seems to be a few random sparse errors from time to time. If you encounter an error, first restart the tool. If the error is persistent, feel free to contact me at `LFmisterL314@gmail.com`, and I will try to fix it as soon as I can!
+
+
 ###### SMKWorkshop Discord
 If you are interested in updates to this project, or Super Mario Kart in general, come join the 
 Super Mario Kart Workshop Discord!
