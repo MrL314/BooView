@@ -1112,8 +1112,8 @@ while True:
 
 									OBJECTS[i].ch_num = next_byte(ch_bytes)
 
-									X = map_value(next_word(ch_bytes), "width")
-									Y = map_value(next_word(ch_bytes), "height")
+									X_coord = map_value(next_word(ch_bytes), "width")
+									Y_coord = map_value(next_word(ch_bytes), "height")
 
 									if (gametype == 0) or (gametype == 2 and i < 2) or (gametype == 4 and (i == 0 or   (i == 1 and (not RECORD_MODE) and SHOW_GHOST )))  or (gametype == 6 and i < 2):
 										
@@ -1122,8 +1122,8 @@ while True:
 										
 
 									else:
-										X = -100
-										Y = -100
+										X_coord = -100
+										Y_coord = -100
 										OBJECTS[i].reset_trail()
 
 										racers_to_follow["racer" + str(i)] = False
@@ -1135,8 +1135,8 @@ while True:
 
 									
 
-									OBJECTS[i].x = X
-									OBJECTS[i].y = Y
+									OBJECTS[i].x = X_coord
+									OBJECTS[i].y = Y_coord
 									OBJECTS[i].z = next_word(ch_bytes)
 
 									OBJECTS[i].angle = map_value(next_byte(ch_bytes), "degrees")
@@ -1650,6 +1650,7 @@ while True:
 					#P_RIGHT_PRESSED = RIGHT_PRESSED
 
 			except TclError as e:
+				#print(e)
 				pass
 			except Exception as e:
 				print(e)
@@ -1657,6 +1658,13 @@ while True:
 				
 
 			pygame.quit()
+
+			if root != None:
+				try:
+					root.destroy()
+					root = None
+				except Exception:
+					pass
 
 			print(addr[0], "disconnected.", end="")
 			printed_reason = False
