@@ -111,7 +111,7 @@ event.onexit(onExit)
 
 socket_client = nil
 
-
+SOCKET_TIMEOUT = nil
 --RECV_BUFFER = {}
 
 
@@ -122,7 +122,7 @@ function connect_client()
 	socket_client = socket.connect(host, port)
 	--socket_client:settimeout(0.1, 't')
 	--socket_client:settimeout(1, 't')
-	socket_client:settimeout(3)
+	socket_client:settimeout(SOCKET_TIMEOUT)
 	console.write("\nConnected to " .. socket_client:getpeername())
 end
 
@@ -577,31 +577,7 @@ while true do
 					
 				end
 
-			elseif string.sub(data, 1, 7) == "OVERLAY" then
-
-
-				overlay_data = ""
-
-				num_tiles = 0
-
-				for i=0,0x3fff do
-					local tile = memory.readbyte(RAM_HIGH_BANK + i)
-					if tile >= 0xc0 then
-						overlay_data = overlay_data .. string.format("%02x", i % 256)
-						overlay_data = overlay_data .. string.format("%02x", (i / 256) % 256)
-						overlay_data = overlay_data .. string.format("%02x", tile)
-						num_tiles = num_tiles + 1
-					end
-				end
-
-				overlay_data = string.format("%02x", num_tiles % 256) .. string.format("%02x", (num_tiles / 256) % 256) .. overlay_data
-
-				send_data(overlay_data .. "\n")
-
-
-
-			end
-			
+		
 
 			--[[
 			for i=0x00,0xff do
@@ -650,7 +626,33 @@ while true do
 
 			memory.writebyte(0x94, memory.readbyte(ghost + 0xa4))
 			memory.writebyte(0x95, memory.readbyte(ghost + 0xa5))
-			
+
+
+		
+		elseif string.sub(data, 1, 7) == "OVERLAY" then
+
+
+			overlay_data = ""
+
+			num_tiles = 0
+
+			for i=0,0x3fff do
+				local tile = memory.readbyte(RAM_HIGH_BANK + i)
+				if tile >= 0xc0 then
+					overlay_data = overlay_data .. string.format("%02x", i % 256)
+					overlay_data = overlay_data .. string.format("%02x", (i / 256) % 256)
+					overlay_data = overlay_data .. string.format("%02x", tile)
+					num_tiles = num_tiles + 1
+				end
+			end
+
+			overlay_data = string.format("%02x", num_tiles % 256) .. string.format("%02x", (num_tiles / 256) % 256) .. overlay_data
+
+			send_data(overlay_data .. "\n")
+
+
+
+		end
 
 
 		elseif string.sub(data, 1, 7) == "W_BYTES" then
@@ -729,6 +731,55 @@ while true do
 			-- request bytes data
 
 
+
+		elseif string.sub(data, 1, 5) == "PAUSE" then
+
+			client.pause()
+			
+			--[[
+			--console.write("Paused")
+			emu.yield()
+			socket_client:settimeout(nil)
+
+			data = receive_data()
+
+			if string.sub(data, 1, 7) == "UNPAUSE" then
+				client.unpause()
+				--console.write("Unpaused")
+			else
+				close_socket_client("Unknown Command: " .. data .. ". Expected 'UNPAUSE'.")
+				END_TRANSMISSION = true
+				break
+			end
+
+			--]]
+
+		elseif string.sub(data, 1, 7) == "UNPAUSE" then
+
+			send_data("unpause\n")
+			client.unpause()
+
+
+		elseif string.sub(data, 1, 6) == "W_SRAM" then
+
+			data = string.sub(data, 8, #data)
+			--console.write(string.sub(data, 0, 30))
+
+
+			local toks = tokenize(data)
+
+			memory.usememorydomain("CARTRAM")
+
+
+			for i=0,#toks-1 do
+				memory.writebyte(i, tonumber(toks[i+1]))
+			end
+
+			memory.usememorydomain("WRAM")
+
+
+
+			
 
 		elseif data == "SOCKET_ERROR_TIMEOUT" then
 			--console.write("timeout")

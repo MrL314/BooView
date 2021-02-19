@@ -23,9 +23,13 @@ import threading
 
 import tkinter as tk
 from tkinter import *
+from tkinter import filedialog
 
 import platform
 
+
+
+import threading
 
 if False:
 	import pygame._view
@@ -484,6 +488,8 @@ SHOW_DEBUG = False
 
 SPRITE_SCALE_VAR = None
 
+in_file_dialogue = False
+
 # ==================================================================================================
 
 
@@ -544,6 +550,55 @@ def toggle_flow():
 	global show_directions
 	show_directions = not show_directions
 
+def set_in_file_dialogue():
+	global in_file_dialogue
+	in_file_dialogue = True
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def sync_stall(conn):
+	while True:
+		data = conn.recv(4096)
+									
+		if not data:
+			conn.send(b"close\n")
+			conn.close()
+			break
+
+		if data == b"sync" or data == b"sync\n":
+			conn.send(b"ack\n")
+		else:
+
+			while data[:5] == b"sync\n":
+				if len(data) > 5:
+					data = data[5:]
+				else:
+					data = b""
+
+
+			
+
+			if data == b"close" or data == b"close\n" or data.decode("utf-8")[:5] == "close":
+				break
+
+			elif data == b"unpause" or data == b"unpause\n" or data.decode("utf-8")[:7] == "unpause":
+				break
+
+			else:
+				break
+
 
 # ==================================================================================================
 
@@ -555,6 +610,8 @@ print("#       Welcome to BooView by MrL314 (v0.4)!       #")
 print("#==================================================#")
 
 root = None
+
+
 
 data = b''
 while True:
@@ -620,6 +677,8 @@ while True:
 				show_checkpoints = False
 				show_directions = False
 
+				in_file_dialogue = False
+
 
 
 
@@ -671,11 +730,16 @@ while True:
 
 
 
+				SRAM_UPLOAD_BUTTON = tk.Button(SIDE_FRAME, text="Load SRAM File", command=set_in_file_dialogue)
+
+
+
 				SIDE_TABLE = [
 					[REPLAY_BUTTON, TRAIL_BUTTON],
 					[CP_BUTTON, FLOW_BUTTON],
 					[(FOLLOW_FRAME, 2)],
-					[(SPRITE_SIZE_FRAME, 2)]
+					[(SPRITE_SIZE_FRAME, 2)],
+					[(SRAM_UPLOAD_BUTTON, 2)]
 					]
 
 				
@@ -738,6 +802,14 @@ while True:
 					#SCROLL_DOWN = False
 
 					PRESSED_RELIEF = SUNKEN
+
+
+
+
+
+
+
+
 
 
 
@@ -885,7 +957,17 @@ while True:
 
 					#if KEYS_NEW["g"] == True: SHOW_GHOST = not SHOW_GHOST
 
+
+
+
 					try:
+
+
+						
+
+
+
+
 
 						data = conn.recv(4096)
 								
@@ -952,6 +1034,48 @@ while True:
 							else:
 								#print(data[:9])
 								conn.send(b"received data\n")
+
+
+
+
+
+						if in_file_dialogue:
+
+
+							conn.send(b"PAUSE\n")
+							#print("Paused")\
+
+							#SYNC_STALL = threading.Thread(target=sync_stall, args=(conn,))
+							#SYNC_STALL.start()
+
+							file_path = tk.filedialog.askopenfilename()
+
+							conn.send(b"UNPAUSE\n")
+
+							#SYNC_STALL.join()
+							#print("Unpaused")
+
+
+							SRM_DATA = []
+							with open(file_path, "rb") as SRM_FILE:
+								SRM_DATA = SRM_FILE.read()
+
+							srm_send = ""
+							for d in SRM_DATA:
+								srm_send += " " + str(d)
+
+							conn.send(("W_SRAM" + srm_send + "\n").encode("utf-8"))
+
+							print("Wrote data from ", file_path)
+
+
+
+
+
+
+							in_file_dialogue = False
+
+							continue
 
 								
 
