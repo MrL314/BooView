@@ -554,6 +554,7 @@ print("#==================================================#")
 print("#       Welcome to BooView by MrL314 (v0.4)!       #")
 print("#==================================================#")
 
+root = None
 
 data = b''
 while True:
@@ -601,9 +602,10 @@ while True:
 
 				pygame.init()
 
+				font = None
 				
+				#font = pygame.font.Font("./assets/freesansbold.ttf", 12)
 
-				font = pygame.font.Font("./assets/freesansbold.ttf", 12)
 
 				#clock = pygame.time.Clock()
 				
@@ -1574,7 +1576,7 @@ while True:
 
 
 
-
+									'''
 
 									if SHOW_DEBUG:
 
@@ -1591,7 +1593,7 @@ while True:
 											CANVAS.blit(text_surface, dest=(0, D_LINE * 14))
 											D_LINE += 1
 										pass
-
+									'''
 
 
 
@@ -1639,12 +1641,12 @@ while True:
 
 
 						#clock.tick(fps)
-					except:
+					except Exception as e:
 						#print(BYTES_AS_LIST)
 						conn.send(b"close\n")
 						conn.close()
-						raise ValueError("eh")
-						break
+						raise
+						
 
 					#P_LEFT_PRESSED = LEFT_PRESSED
 					#P_RIGHT_PRESSED = RIGHT_PRESSED
@@ -1677,6 +1679,9 @@ while True:
 			if not printed_reason:
 				print("  Reason: Server Script Forcibly Stopped")
 
-			conn.send(b"close\n")
-			conn.close()
+			try:
+				conn.send(b"close\n")
+				conn.close()
+			except ConnectionResetError:
+				pass
 		
