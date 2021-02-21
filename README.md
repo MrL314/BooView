@@ -5,6 +5,17 @@ Data Visualizer for Super Mario Kart (SNES)
 Quick Download: https://github.com/MrL314/BooView/archive/main.zip
 
 
+## Current Features
+- View Pre-rendered Flow Maps and Checkpoint Bounds images for the tracks!
+- View previous positions of racers via Trail mode, showing the racer's recent path
+- Interact with objects and change their position in-game from the tool window
+- Follow along with racers by clicking their icon in the right panel
+- Scale sprites in the window for ease of viewing
+- Top-down view sprites, mixed from custom and existing assets
+- SRM file upload to load your favorite save data into the game with ease
+- Replay time trial ghosts as if it were running real-time! 
+  - Combined with Trails mode, you can see the racing line of your best records!
+
 
 
 ## Requirements: 
