@@ -1097,6 +1097,8 @@ while True:
 
 							demo_byte = next_byte(ch_bytes)
 
+							SPRITE_SIZE_WIDGET.config(state='normal')
+
 							if ghost_mode_byte == 0x02 and demo_byte == 0:
 								REPLAY_BUTTON.config(state="normal")
 
@@ -1808,4 +1810,7 @@ while True:
 				conn.close()
 			except ConnectionResetError:
 				pass
+
+
+	break
 		
