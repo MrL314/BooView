@@ -12,6 +12,7 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
 1. Bizhawk **2.3** (http://tasvideos.org/BizHawk.html)
    - Run the prereq installer before installing if on Windows
    - **MAKE SURE it's version 2.3**
+2. 64-Bit Windows OS
 
 If running from raw source code, make sure to use Python 3.6 (higher versions may not work properly), and run `SETUP.bat`
 
@@ -52,6 +53,8 @@ If you are having framerate issues, considering editting the options in the **co
 ###### Crashes and Errors
 There seems to be a few random sparse errors from time to time. If you encounter an error, first restart the tool. If the error is persistent, feel free to contact me at `LFmisterL314@gmail.com`, and I will try to fix it as soon as I can!
 
+Sometimes the program will fail to run when starting. If this happens, just exit the program and restart it. 
+
 
 ###### SMKWorkshop Discord
 If you are interested in updates to this project, or Super Mario Kart in general, come join the 
@@ -71,6 +74,12 @@ Patreon:
 	https://www.patreon.com/MrL314 
 
 
+###### Special Thanks to
+- ScouB
+- Dirtbag
+- SmorBjorn
+- The SMK Workshop Community
+- and YOU!
 
 
 ## GNU License
