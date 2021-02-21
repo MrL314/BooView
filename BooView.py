@@ -621,10 +621,13 @@ while True:
 		s.listen()
 		#print("Listening for connection on port %d..." % (PORT,))
 		conn, addr = s.accept()
+
+
 		BYTES_AS_LIST = []
 
 
 		with conn:
+			#conn.settimeout(10)
 			try:
 				print('Connected by', addr[0])
 
@@ -1810,7 +1813,9 @@ while True:
 				conn.close()
 			except ConnectionResetError:
 				pass
+			except OSError:
+				pass
 
 
-	break
+	
 		

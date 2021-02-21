@@ -285,14 +285,21 @@ local REASON = ""
 
 SOCKET_DATA = " "
 
+
+
+
 while true do
 
 	END_TRANSMISSION = false
 
 	while socket_client_is_open() do
 
+		
+
+
 		local data = receive_data()
 
+		
 
 		if isEndFlag(data) then
 			END_TRANSMISSION = true
@@ -300,8 +307,12 @@ while true do
 			break
 		end
 
+		
+
 		if string.sub(data, 1, 5) == "FRAME" then
 			--sync
+
+			
 
 			if frame >= 2 then
 				frame = 0
@@ -330,6 +341,8 @@ while true do
 			-- gamemode
 			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x36))
 
+			
+
 			-- ghost enable
 			g_enable = memory.readbyte(RAM_HIGH_BANK + 0xff02)
 			if g_enable == 0 then
@@ -337,6 +350,9 @@ while true do
 					g_enable = 2
 				end
 			end
+
+			
+
 			character_bytes = character_bytes .. string.format("%02x", g_enable)
 
 			-- in demo?
@@ -351,7 +367,7 @@ while true do
 			-- camera angle
 			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x95))
 			
-
+			
 
 			for i=0, 7 do
 
@@ -379,8 +395,14 @@ while true do
 				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x25))
 
 
-				racer_cp = memory.readbyte(0x1000 + (i*0x100) + 0xc0)
-				table_index = 2 * ((racer_cp)%race_checkpoints)
+				if race_checkpoints ~= 0 then
+					racer_cp = memory.readbyte(0x1000 + (i*0x100) + 0xc0)
+					table_index = 2 * ((racer_cp)%race_checkpoints)
+				else
+					table_index = 0
+				end
+
+
 				-- checkpoint x position
 				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x900 + table_index))
 				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x901 + table_index))
@@ -388,6 +410,8 @@ while true do
 				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0xa00 + table_index))
 				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0xa01 + table_index))
 			end
+
+
 
 			--send_data(character_bytes .. "\n")
 
