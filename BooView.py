@@ -606,7 +606,7 @@ def sync_stall(conn):
 
 
 print("#==================================================#")
-print("#       Welcome to BooView by MrL314 (v0.4)!       #")
+print("#       Welcome to BooView by MrL314 (v1.0)!       #")
 print("#==================================================#")
 
 root = None
