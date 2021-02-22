@@ -40,12 +40,13 @@ If running from raw source code, make sure to use Python 3.6 (higher versions ma
 
 1. Open BizHawk (**EmuHawk.exe**) and load a Super Mario Kart rom
    - Version should not matter
-2. In BizHawk, go to **Tools > Lua Console**
-3. In the Lua Console, go to **Script > Open Script**
-4. Navigate to the downloaded folder, and click on **LuaSide.lua**
+2. In BizHawk, go to **Config > Customize**. Then at the bottom of that window, ensure that **Lua+LuaInterface** is selected. 
+3. In BizHawk, go to **Tools > Lua Console**
+4. In the Lua Console, go to **Script > Open Script**
+5. Navigate to the downloaded folder, and click on **LuaSide.lua**
    - This should freeze the emulator for a few seconds, then resume after.
    - This will load the script into the console.
-5. Run **BooView.bat**
+6. Run **BooView.bat**
    - Wait a few seconds until the welcome message appears
    - If running from raw source, run `python BooView.py`
 7. In the Lua Console, double click on the red square next to **LuaSide**
