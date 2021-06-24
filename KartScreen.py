@@ -63,11 +63,11 @@ class Screen(pygame.Surface):
 
 	@property
 	def SCALE(self):
-		return self.w / self.DEFAULT_WIDTH
+		return (self.w / self.DEFAULT_WIDTH) / 2
 
 	@property
 	def INV_SCALE(self):
-		return self.DEFAULT_WIDTH / self.w
+		return (self.DEFAULT_WIDTH / self.w) * 2
 	
 
 
@@ -87,12 +87,12 @@ class Screen(pygame.Surface):
 		if self.y + self.h < self.DEFAULT_Y + self.DEFAULT_HEIGHT:
 			self.y = self.DEFAULT_Y + self.DEFAULT_HEIGHT - self.h
 		
-		cv = pygame.Surface(( ((self.DEFAULT_WIDTH*self.INV_SCALE)//1 + 1) * 1, ((self.DEFAULT_HEIGHT*self.INV_SCALE)//1 + 1) * 1))
+		cv = pygame.Surface(( ((self.DEFAULT_WIDTH*self.INV_SCALE/2)//1 + 1) * 1, ((self.DEFAULT_HEIGHT*self.INV_SCALE/2)//1 + 1) * 1))
 
 		#cv.blit(self._screen, (self.x*self.INV_SCALE, self.y*self.INV_SCALE), area=cv.get_rect().move(self.x * self.INV_SCALE * -1, self.y * self.INV_SCALE * -1))
 		#cv.blit(self._screen, (0, 0), area=cv.get_rect().move(self.x * self.INV_SCALE * -1, self.y * self.INV_SCALE * -1))
 
-		cv.blit(self._screen, (self.x*self.INV_SCALE, self.y*self.INV_SCALE))
+		cv.blit(self._screen, (self.x*self.INV_SCALE/2, self.y*self.INV_SCALE/2))
 
 		#cv.blit(self._screen, (self.x*self.INV_SCALE, self.y*self.INV_SCALE), area=cv.get_rect())
 
@@ -121,7 +121,7 @@ class Screen(pygame.Surface):
 	def zoom(self, pos, zoom_ratio):
 
 		if self.w * zoom_ratio > self.DEFAULT_WIDTH * 8:
-			zoom_ratio = self.INV_SCALE * 8
+			zoom_ratio = (self.INV_SCALE/2) * 8
 
 		self.w = self.w * zoom_ratio
 		self.h = self.h * zoom_ratio

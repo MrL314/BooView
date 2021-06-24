@@ -1,4 +1,6 @@
-# BooView
+
+
+# BooView ![BooView Logo](https://github.com/MrL314/BooView/blob/main/assets/icon.png)
 Data Visualizer for Super Mario Kart (SNES)
 
 
@@ -6,13 +8,14 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
 
 
 ## Current Features
-- View Pre-rendered Flow Maps and Checkpoint Bounds images for the tracks!
+- View **Dynamically rendered** Flow Maps and Checkpoints in a top-down view!
+  - Now dynamically renders track data as well
 - View previous positions of racers via Trail mode, showing the racer's recent path
 - Interact with objects and change their position in-game from the tool window
 - Follow along with racers by clicking their icon in the right panel
 - Scale sprites in the window for ease of viewing
 - Top-down view sprites, mixed from custom and existing assets
-- SRM file upload to load your favorite save data into the game with ease
+- SRM file uploading to load your favorite save data into the game with ease
 - Replay time trial ghosts as if it were running real-time! 
   - Combined with Trails mode, you can see the racing line of your best records!
 
@@ -23,7 +26,7 @@ Quick Download: https://github.com/MrL314/BooView/archive/main.zip
 1. Bizhawk **2.3** (http://tasvideos.org/BizHawk.html)
    - Run the prereq installer before installing if on Windows
    - **MAKE SURE it's version 2.3**
-2. 64-Bit Windows OS
+2. [Recommended] 64-Bit Windows OS
 
 If running from raw source code, make sure to use Python 3.6 (higher versions may not work properly), and run `SETUP.bat`
 
@@ -80,8 +83,8 @@ brought to my attention that some people would like to donate in order to suppor
 in making more -- as well as better -- tools for the community as a whole. If this applies to you, 
 donate via the link below. 10% of all proceeds earned through that donation link will go towards 
 the Autistic Self Advocacy Network, a charity devoted to the betterment of autistic and disabled
-individuals.
- 
+people.
+
 Patreon:
 	https://www.patreon.com/MrL314 
 

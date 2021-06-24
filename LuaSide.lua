@@ -72,12 +72,7 @@ function tokenize(s)
 	end
 	table.insert(t, string.sub(s, from))
 
-	--[[
-	for str in string.gmatch(s, "([^%s]+)") do
-		--console.write(str)
-		table.insert(t, str)
-	end
-	--]]
+
 
 	return t
 end
@@ -93,15 +88,7 @@ function isEndFlag(data)
 end
 
 
---[[
-function is_table_empty(T):
-	local next = next
-	if next(T) == nil then
-		return true
-	end
-	return false
-end
---]]
+
 
 function onExit()
 	close_socket_client("Client Script Forcibly Stopped")
@@ -199,9 +186,7 @@ function receive_data()
 			return nil
 		end
 
-		if data == "ack" then
-			SYNCED = true
-		end
+		
 
 		if data == "SOCKET_ERROR_TIMEOUT" then
 			return data
@@ -220,6 +205,8 @@ function sync_with_server()
 		socket_client:send("sync\n")
 		local data = receive_from_server()
 
+		--if data == true then return true
+
 		if data == nil then
 			return false
 		end
@@ -235,10 +222,38 @@ function sync_with_server()
 		end
 
 		-- test this to make sure it makes sense
+		console.write("\nSYNC RECEIVED: " .. data)
 		return true
 	end
 	return false
 end
+
+
+
+
+
+
+function readMemoryBlock(domain, start, block_size)
+
+	local return_domain = memory.getcurrentmemorydomain()
+
+	local block = ""
+
+	memory.usememorydomain(domain)
+
+	for i=0,block_size-1 do
+		block = block .. string.format("%02x", memory.readbyte(start + i))
+	end
+
+
+	memory.usememorydomain(return_domain)
+
+	return block
+
+end
+
+
+
 
 
 local FRAME_COUNT = 2
@@ -286,7 +301,14 @@ local REASON = ""
 SOCKET_DATA = " "
 
 
+local prev_map = {}
+for i=1,0x4000 do
+	table.insert(prev_map, -1)
+end
 
+local check_map_updates = false
+
+local paused = false
 
 while true do
 
@@ -311,6 +333,14 @@ while true do
 
 		if string.sub(data, 1, 5) == "FRAME" then
 			--sync
+
+
+			if not sync_with_server() then
+				REASON = "BAD SYNC"
+				END_TRANSMISSION = true
+				break
+			end
+			
 
 			
 
@@ -363,6 +393,12 @@ while true do
 
 			-- track number
 			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x124))
+
+			-- track theme
+			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x126))
+
+			-- theme object
+			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0xe30))
 
 			-- camera angle
 			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x95))
@@ -522,7 +558,82 @@ while true do
 			end
 
 
-			send_data(character_bytes .. "\n" .. obj_bytes .. "\n" .. item_bytes .. "\n")
+
+
+			-- map updating
+
+			map_updates = ""
+
+
+			if check_map_updates == false then
+				--console.write("\nMAP RESET")
+
+				for i=1,0x4000 do
+					local tile = memory.readbyte(RAM_HIGH_BANK + i-1)
+					prev_map[i] = tile
+				end
+
+			else
+				
+
+				local SENSING_RADIUS = 5 --3
+
+				for i=1,8 do
+
+					local TILE_IND = 0
+
+					local ch_offs = 0x1000 + (i-1)*0x100
+
+					local tile_ind = memory.read_u16_le(ch_offs + 0x58)
+
+
+					for xoff= -1 * (SENSING_RADIUS-1), (SENSING_RADIUS-1) do
+						for yoff=-1 * (SENSING_RADIUS-1), (SENSING_RADIUS-1) do
+
+							local TILE_IND = (tile_ind + xoff) + (yoff * 128)
+
+							if TILE_IND >= 0 and TILE_IND < 0x4000 then
+
+								local tile = memory.readbyte(RAM_HIGH_BANK + TILE_IND)
+
+								if tile ~= prev_map[TILE_IND + 1] then
+
+									if check_map_updates == true then
+
+										local map_ind = TILE_IND
+
+										map_updates = map_updates .. string.format("%02x", map_ind % 256)
+										map_updates = map_updates .. string.format("%02x", (map_ind / 256) % 256)
+										map_updates = map_updates .. string.format("%02x", tile)
+
+									end
+
+									prev_map[TILE_IND + 1] = tile
+								end
+
+							end
+
+						end
+					end
+
+				end
+
+			end
+
+			check_map_updates = true
+
+
+
+
+
+
+
+
+			send_data(character_bytes .. "\n" .. obj_bytes .. "\n" .. item_bytes .. "\n" .. map_updates .. "\n")
+
+
+
+
 
 			--[[
 			if receive_data() ~= "received data" then
@@ -542,12 +653,13 @@ while true do
 		
 
 
-
+			--[[
 			if not sync_with_server() then
 				REASON = "BAD SYNC"
 				END_TRANSMISSION = true
 				break
 			end
+			--]]
 
 		elseif string.sub(data, 1, 8) == "DO_GHOST" then
 
@@ -758,30 +870,32 @@ while true do
 
 		elseif string.sub(data, 1, 5) == "PAUSE" then
 
-			client.pause()
+			paused = true
+			--client.SetSoundOn(false)
+			--emu.frameadvance();
+			--client.pause()
+			--emu.yield();
+			console.write("\nPaused\n")
 			
-			--[[
-			--console.write("Paused")
-			emu.yield()
-			socket_client:settimeout(nil)
-
-			data = receive_data()
-
-			if string.sub(data, 1, 7) == "UNPAUSE" then
-				client.unpause()
-				--console.write("Unpaused")
-			else
-				close_socket_client("Unknown Command: " .. data .. ". Expected 'UNPAUSE'.")
-				END_TRANSMISSION = true
-				break
+			while string.sub(receive_data(), 1, 7) ~= "UNPAUSE" do
+				frame = frame + 1
+				emu.frameadvance();
 			end
 
-			--]]
+
+
 
 		elseif string.sub(data, 1, 7) == "UNPAUSE" then
-
-			send_data("unpause\n")
+			
+			--send_data("unpause\n")
+			paused = false
 			client.unpause()
+			--client.SetSoundOn(true)
+			--frame = frame + 1
+			--emu.frameadvance();
+			console.write("Unpaused\n")
+
+
 
 
 		elseif string.sub(data, 1, 6) == "W_SRAM" then
@@ -792,18 +906,214 @@ while true do
 
 			local toks = tokenize(data)
 
-			memory.usememorydomain("CARTRAM")
+			
 
+			if not (#toks == 1 and toks[1] == "") then
+				memory.usememorydomain("CARTRAM")
 
-			for i=0,#toks-1 do
-				memory.writebyte(i, tonumber(toks[i+1]))
+				for i=0,#toks-1 do
+					memory.writebyte(i, tonumber(toks[i+1]))
+				end
+
+				memory.usememorydomain("WRAM")
 			end
 
+
+
+
+
+
+
+		elseif string.sub(data, 1, 5) == "TRACK" then
+
+			local track_data = ""
+			local nonce = ""
+
+			for i=1,8 do
+				track_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + ((i-1)*0x800), 0x800)
+				send_data(track_data .. "\n")
+				nonce = receive_data()
+			end
+			--[[
+
+			track_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x1000, 0x1000)
+			send_data(track_data .. "\n")
+			nonce = receive_data()
+
+			track_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x2000, 0x1000)
+			send_data(track_data .. "\n")
+			nonce = receive_data()
+
+			track_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x3000, 0x1000)
+			send_data(track_data .. "\n")
+			--]]
+
+
+		elseif string.sub(data, 1, 7) == "CP_DATA" then
+
+			local cp_data = ""
+			local nonce = ""
+
+			for i=1,2 do
+				cp_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x5000 + (i-1)*0x800, 0x800)
+				send_data(cp_data .. "\n")
+				nonce = receive_data()
+			end
+
+			--readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x5000, 0x1000)
+
+			--send_data(cp_data .. "\n")
+
+
+		elseif string.sub(data, 1, 4) == "FLOW" then
+
+			local flow_data = ""
+			local nonce = ""
+
+			for i=1,2 do
+				flow_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x4000 + (i-1)*0x800, 0x800)
+				send_data(flow_data .. "\n")
+				nonce = receive_data()
+			end
+
+			--local flow_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x4000, 0x1000)
+
+			--send_data(flow_data .. "\n")
+
+
+		elseif string.sub(data, 1, 7) == "PALETTE" then
+
+			local palette_data = readMemoryBlock("WRAM", 0x3a80, 0x200)
+
+			send_data(palette_data .. "\n")
+
+
+		elseif string.sub(data, 1, 5) == "TILES" then
+			local tile_data = ""
+			local nonce = ""
+			--console.write("\nStart tiles")
+
+			for i=1,16 do
+				tile_data = readMemoryBlock("VRAM", (i-1) * 0x800, 0x800)
+				send_data(tile_data .. "\n")
+				nonce = receive_data()
+			end
+
+			--[[
+			--console.write("\nIn tiles 1")
+
+			tile_data = readMemoryBlock("VRAM", 0x1000, 0x1000)
+			send_data(tile_data .. "\n")
+			nonce = receive_data()
+
+			--console.write("\nIn tiles 2")
+
+			tile_data = readMemoryBlock("VRAM", 0x2000, 0x1000)
+			send_data(tile_data .. "\n")
+			nonce = receive_data()
+
+			--console.write("\nIn tiles 3")
+
+			tile_data = readMemoryBlock("VRAM", 0x3000, 0x1000)
+			send_data(tile_data .. "\n")
+			
+			--console.write("\nFinished Tiles")
+			--]]
+
+
+
+
+		elseif string.sub(data, 1, 9) == "RESET_MAP" then
+
+			local return_domain = memory.getcurrentmemorydomain()
 			memory.usememorydomain("WRAM")
 
+			for i=1,0x4000 do
+				local tile = memory.readbyte(RAM_HIGH_BANK + i-1)
+				prev_map[i] = tile
+			end
+
+			memory.usememorydomain(return_domain)
+
+
+
+			check_map_updates = false
+
+			send_data("nonce\n")
+
+
+
+
+
+		
+		elseif string.sub(data, 1, 10) == "UPDATE_MAP" then
+			--[[
 
 
 			
+
+			local return_domain = memory.getcurrentmemorydomain()
+			memory.usememorydomain("WRAM")
+
+
+			map_updates = ""
+			
+			local SENSING_RADIUS = 10 --3
+
+			for i=1,8 do
+
+				local TILE_IND = 0
+
+				local ch_offs = 0x1000 + (i-1)*0x100
+
+
+
+				local tile_ind = memory.read_u16_le(ch_offs + 0x58)
+
+
+				for xoff= -1 * (SENSING_RADIUS-1), (SENSING_RADIUS-1) do
+					for yoff=-1 * (SENSING_RADIUS-1), (SENSING_RADIUS-1) do
+
+						local TILE_IND = (tile_ind + xoff) + (yoff * 128)
+
+						if TILE_IND >= 0 and TILE_IND < 0x4000 then
+
+							local tile = memory.readbyte(RAM_HIGH_BANK + TILE_IND)
+
+							if tile ~= prev_map[TILE_IND + 1] then
+
+								if check_map_updates == true then
+
+									--console.write(string.format("%04x", TILE_IND) .. " " .. string.format("%02x", prev_map[TILE_IND]) .. " " .. string.format("%02x", tile) .. "\n")
+
+									local map_ind = TILE_IND
+
+									map_updates = map_updates .. string.format("%02x", map_ind % 256)
+									map_updates = map_updates .. string.format("%02x", (map_ind / 256) % 256)
+									map_updates = map_updates .. string.format("%02x", tile)
+
+								end
+
+								prev_map[TILE_IND + 1] = tile
+							end
+
+						end
+
+					end
+				end
+
+			end
+
+			check_map_updates = true
+
+
+
+			memory.usememorydomain(return_domain)
+
+			send_data(map_updates .. "\n")
+			--]]
+
+
 
 		elseif data == "SOCKET_ERROR_TIMEOUT" then
 			--console.write("timeout")
@@ -845,12 +1155,10 @@ while true do
 	end
 
 
-
-	frame = frame + 1
-	--joypad.set(currentJoypad, player)
-	--joypad.set(currentJoypad, player)
-	emu.frameadvance();
-	--joypad.set(currentJoypad, player)
+	if true then--paused == false then
+		frame = frame + 1
+		emu.frameadvance();
+	end
 end
 
 

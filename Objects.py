@@ -49,6 +49,8 @@ def ITEM_NUM_TO_NAME(n):
 		raise IndexError("Invalid Character Number: " + str(n))
 	
 
+
+'''
 OBSTACLE_NAMES = ("pipe_g", "pipe_g", "pipe_g", "pipe_g", 
 	"pole", "pole", "pole", "pole", 
 	"mole", "mole", "mole", "mole", 
@@ -73,6 +75,18 @@ OBSTACLE_NAMES = ("pipe_g", "pipe_g", "pipe_g", "pipe_g",
 	"balloon_b", "balloon_r", "balloon_b", "balloon_r",
 	"balloon_b", "balloon_r", "balloon_b", "balloon_r",
 	"balloon_b", "balloon_r", "balloon_b", "balloon_r",)
+'''
+
+OBSTACLE_NAMES = ("pole", "pole", "pole", "pole", 
+	"pipe_g", "pipe_g", "pipe_g", "pipe_g", 
+	"mole", "mole", "mole", "mole", 
+	"plant_A", "plant_A", "plant_B", "plant_B", 
+	"pipe_g", "pipe_g", "pipe_g", "pipe_g", #VL pipes
+	"cheep", "cheep", "cheep", "cheep", 
+	"thwomp", "thwomp", "thwomp", "thwomp", 
+	"balloon_b", "balloon_r", "balloon_b", "balloon_r",)
+
+
 
 
 def OBSTACLE_NUM_TO_NAME(n):
@@ -105,6 +119,7 @@ class Game_Object(object):
 		self.scl = img_scale
 		self.ID = OBJ_ID
 		self.address = address
+		self.win_scl = 1
 
 	@property
 	def x(self):
@@ -174,6 +189,14 @@ class Game_Object(object):
 
 
 	@property
+	def win_scl(self):
+		return self._win_scl
+	@win_scl.setter
+	def win_scl(self, _win_scl):
+		self._win_scl = _win_scl
+
+
+	@property
 	def angle(self):
 		return self._angle
 	@angle.setter
@@ -218,12 +241,22 @@ class Game_Object(object):
 		z_scl /= 0x2000
 		z_scl += 1
 		#IMG = pygame.transform.smoothscale(self.img, (self.scl, self.scl))
+		#IMG = pygame.transform.scale(self.img, (math.floor(self.scl * z_scl / self.win_scl), math.floor(self.scl * z_scl / self.win_scl)))
 		IMG = pygame.transform.scale(self.img, (math.floor(self.scl * z_scl), math.floor(self.scl * z_scl)))
 		#IMG = pygame.transform.smoothscale(self.img, (self.img.get_width()*self.scl, self.img.get_height()*self.scl))
 		#IMG = pygame.transform.scale(self.img, (self.img.get_width()*self.scl, self.img.get_height()*self.scl))
 		IMG = Assets.rot_image(IMG, self.angle)
 		
-		self.surface.blit(IMG, (math.floor(self.disp_x-(IMG.get_width()/2)), math.floor(self.disp_y-(IMG.get_height()/2))))
+		'''
+		self.surface.blit(IMG, (
+			math.floor( (self.disp_x-(IMG.get_width()  ))//self.win_scl), 
+			math.floor( (self.disp_y-(IMG.get_height() ))//self.win_scl)
+		))
+		'''
+		self.surface.blit(IMG, (
+			math.floor( ((self.disp_x)-(IMG.get_width() / 2 ))), 
+			math.floor( ((self.disp_y)-(IMG.get_height()/ 2 )))
+		))
 
 
 
