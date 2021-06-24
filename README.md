@@ -54,7 +54,7 @@ If running from raw source code, make sure to use Python 3.6 (higher versions ma
    - If running from raw source, run `python BooView.py`
 7. In the Lua Console, double click on the red square next to **LuaSide**
 
-If the script is already loaded in the console, all you need to do is step 5 and 6.
+If the script is already loaded in the console, all you need to do is step 6 and 7.
 
 
 ## Config Options
