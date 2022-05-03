@@ -2,10 +2,15 @@
 import os
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
-import math, pygame, sys, json
+import math, pygame, sys, json, OpenGL, numpy
 from pygame.gfxdraw import *
 from pygame.locals import *
 
+from OpenGL.GL import *
+from OpenGL.GL import shaders
+from OpenGL.GLU import *
+
+from ctypes import *
 
 import socket
 
@@ -13,12 +18,26 @@ import math
 import errno
 import time
 
+from collections import deque
 
+
+if False:
+	import pygame._view
+
+#pygame.init()
+#pygame.display.set_mode((1, 1), pygame.NOFRAME)
 import Assets
+#pygame.quit()
+
+
+
 import Objects
 import KartScreen as KS
 
 import TrackHelper
+
+import BVmain
+
 
 
 import threading
@@ -35,8 +54,9 @@ import platform
 
 import threading
 
-if False:
-	import pygame._view
+import traceback
+
+
 
 
 #HOST = '127.0.0.1'
@@ -69,6 +89,10 @@ class character_bytes(object):
 
 
 
+
+PY_VERSION_NUMBER = "2.0"
+LUA_VERSION_NUMBER = "2.0"
+
 CH_BYTES = character_bytes()
 OBJ_BYTES = character_bytes()
 ITEM_BYTES = character_bytes()
@@ -86,42 +110,13 @@ SQRT_2 = 2 ** 0.5
 
 
 
-'''
-MAP_NAMES = [
-	"MC3",
-	"GV2",
-	"DP2",
-	"BC2",
-	"VL2",
-	"RR",
-	"KB2",
-	"MC1",
-	"GV3",
-	"BC3",
-	"CI2",
-	"DP3",
-	"VL1",
-	"KB1",
-	"MC4",
-	"MC2",
-	"GV1",
-	"BC1",
-	"CI1",
-	"DP1",
-	"BT3",
-	"BT4",
-	"BT1",
-	"BT2"
-]
-'''
-
-
-SIDE_FRAME_WIDTH = 100
 
 WINDOW_WIDTH = config["window_size"]
 WINDOW_HEIGHT = config["window_size"]
 
+MAX_TRAILS_CONFIG = config["max_trail_length"]
 
+TRAIL_FREQ_CONFIG = config["trail_log_rate"]
 
 #width = config["window_size"]
 #height = config["window_size"]
@@ -129,6 +124,7 @@ WINDOW_HEIGHT = config["window_size"]
 
 
 width = height = 1024
+MAP_W = MAP_H = 1024
 
 
 
@@ -137,11 +133,10 @@ spf = 1.0 / 60.0
 
 
 screen = None
-CANVAS = None
 
 
 def hex_to_int(h):
-	return int('0x' + h, 16)
+	return int(h, 16)
 
 
 def byte_buffer(buf):
@@ -152,39 +147,52 @@ def byte_buffer(buf):
 		index += 1
 
 def next_byte(g):
-	b = next(g)
-
-	return hex_to_int(b)
+	return next(g)
+	
 
 def next_word(g):
-	low = next(g)
-	high = next(g)
-	return hex_to_int(low) + (256 * hex_to_int(high))
+	L = next(g)
+	H = next(g)
+	return L + (H << 8)
 
 def next_word_signed(g):
 	val = next_word(g)
+	if val > 0x7fff: val -= 0x10000
+	return val
 
-	if val > 0x7fff:
-		val -= 0x10000
+def next_long(g):
+	L = next(g)
+	M = next(g)
+	H = next(g)
+	return L + (M << 8) + (H << 16)
 
+def next_double(g):
+	L1 = next(g)
+	L2 = next(g)
+	H1 = next(g)
+	H2 = next(g)
+	return ((L1 + (L2 << 8))/65536) + (H1 + (H2 << 8))
+
+def next_double_signed(g):
+	val = next_double(g)
+	if val > 0x7fff: val -= 0x10000
 	return val
 
 
 
-def map_value(val, map_type=None):
 
-	if map_type == None:
-		return val
-	elif map_type == 'width':
-		return (val * width) / 1024
-	elif map_type == 'height':
-		return (val * height) / 1024
-	elif map_type == 'radians':
-		return (val * -2 * math.pi) / 255
-	elif map_type == 'degrees':
-		return (val * -360) / 255
-	else:
-		return val
+MAP_SCLS = {
+	'width': width / 1024,
+	'height': height / 1024,
+	'radians': -2 * math.pi / 255,
+	'degrees': -360 / 255,
+}
+
+
+def map_value(val, map_type=None):
+	try: return val * MAP_SCLS[map_type]
+	except: return val
+
 
 
 def angle_between(angle_1, angle_2):
@@ -260,14 +268,13 @@ OBJECTS = [Racer0, Racer1, Racer2, Racer3, Racer4, Racer5, Racer6, Racer7,  Obj0
 
 
 
-SCREEN_SCALE = width
 
-PREV_SCALE = 1
+
 
 
 mouse = (-1, -1)
 mouse_rel = (0, 0)
-pressed = (False, False, False)
+###pressed = (False, False, False)
 
 
 F = 0
@@ -283,7 +290,7 @@ FOLLOW_MODE = False
 FOLLOW_MODE_2P = False
 
 
-TRAIL_LINES = False
+
 
 grabbed = -1
 
@@ -374,18 +381,9 @@ for k_button in CURR_FRAME_KEYS:
 
 
 FOLLOWING = []
-racers_to_follow = {
-	"racer0": False,
-	"racer1": False,
-	"racer2": False,
-	"racer3": False,
-	"racer4": False,
-	"racer5": False,
-	"racer6": False,
-	"racer7": False
-}
 
-SHOW_GHOST = True
+
+
 
 ghost_mode_byte = 0
 
@@ -401,14 +399,11 @@ FRAME_SKIP = config["FRAME_SKIP"]
 FRAME_NUMBER = 0
 
 
-MAP_UPDATE_TIMER = 0
-MAP_UPDATE_RATE = 1
 
 demo_byte = 0
 
 
 
-NUM_TRAILS = 2000
 
 GHOST_FLASH_TIMER = 0
 
@@ -417,18 +412,14 @@ GHOST_FLASH_TIMER = 0
 SPRITE_SCALE = 2
 
 
-RECORD_MODE = False
+
 
 SHOW_DEBUG = False
 
-SPRITE_SCALE_VAR = None
-
-in_file_dialogue = False
 
 
-CURR_TRACK_PALETTE = None
-CURR_TRACK_TILES   = None
-CURR_TRACK_TILEMAP = None
+
+
 
 MAP_UPDATE_BYTES = []
 
@@ -443,70 +434,19 @@ MAP_UPDATE_BYTES = []
 
 # ==================================================================================================
 
-def toggle_record_mode():
-	global RECORD_MODE
-	RECORD_MODE = not RECORD_MODE
-
-def toggle_trails():
-	global TRAIL_LINES
-	TRAIL_LINES = not TRAIL_LINES
 
 
-def toggle_follow_1():
-	global racers_to_follow
-	racers_to_follow["racer0"] = not racers_to_follow["racer0"]
 
-def toggle_follow_2():
-	global racers_to_follow
-	racers_to_follow["racer1"] = not racers_to_follow["racer1"]
 
-def toggle_follow_3():
-	global racers_to_follow
-	racers_to_follow["racer2"] = not racers_to_follow["racer2"]
-
-def toggle_follow_4():
-	global racers_to_follow
-	racers_to_follow["racer3"] = not racers_to_follow["racer3"]
-
-def toggle_follow_5():
-	global racers_to_follow
-	racers_to_follow["racer4"] = not racers_to_follow["racer4"]
-
-def toggle_follow_6():
-	global racers_to_follow
-	racers_to_follow["racer5"] = not racers_to_follow["racer5"]
-
-def toggle_follow_7():
-	global racers_to_follow
-	racers_to_follow["racer6"] = not racers_to_follow["racer6"]
-
-def toggle_follow_8():
-	global racers_to_follow
-	racers_to_follow["racer7"] = not racers_to_follow["racer7"]
-
-def toggle_cp():
-	global show_checkpoints
-	show_checkpoints = not show_checkpoints
-
-def toggle_flow():
-	global show_directions
-	show_directions = not show_directions
-
-def set_in_file_dialogue():
-	global in_file_dialogue
-	in_file_dialogue = True
+SOCKET_DEBUG = False
 
 
 
 
 
-
-
-
-
-
-
-
+def print_socket(d):
+	if SOCKET_DEBUG:
+		print("[DEBUG]", d)
 
 
 
@@ -527,7 +467,11 @@ def SEND_DATA(data, send_all=False):
 
 	while bytes_left > 0:
 		try:
-			_num_sent = SOCKET_CONN.send(data[bytes_sent:])
+			b = data[bytes_sent:]
+
+			#print_socket(">>>" + b.decode("ascii"))
+
+			_num_sent = SOCKET_CONN.send(b)
 
 			if _num_sent == 0: raise ConnectionResetError("CONNECTION ERROR!")
 
@@ -547,13 +491,18 @@ def SEND_DATA(data, send_all=False):
 
 
 
-def RECV_DATA():
+def RECV_DATA(block=True):
 	global SOCKET_CONN
+
+	if SOCKET_CONN.gettimeout() == None:
+		if block == False:
+			SOCKET_CONN.settimeout(2)
 
 	CONN_DAT = ""
 
 	CONN_DAT += SOCKET_CONN.recv(8192).decode("ascii")
 
+	#print_socket("<<< " + CONN_DAT)
 
 
 	return CONN_DAT
@@ -582,16 +531,22 @@ def send_raw_signal(raw): 		send_signal(raw)
 def send_frame_signal(): 		send_signal("FRAME")
 def send_close_signal(): 		send_signal("close")
 def send_ghost_signal(): 		send_signal("DO_GHOST")
+def send_ghost_off_signal():    send_signal("GHOST_OFF")
 def send_ack_signal(): 			send_signal("ack")
 def send_pause_signal():		send_signal("PAUSE")
 def send_unpause_signal(): 		send_signal("UNPAUSE")
+def send_yield_signal():		send_signal("YIELD")
+def send_unyield_signal(): 		send_signal("UNYIELD")
 def send_reset_map_signal(): 	send_signal("RESET_MAP")
 
 def send_palette_signal(): send_signal("PALETTE")
 def send_tileset_signal(): send_signal("TILES")
 def send_tilemap_signal(): send_signal("TRACK")
-def send_cp_data_signal(): send_signal("CP_DATA")
+def send_zonemap_signal(): send_signal("ZONE")
 def send_flowmap_signal(): send_signal("FLOW")
+def send_cp_data_signal(): send_signal("CP_DATA")
+
+def send_id_signal(): send_signal("ID_BVPY_" + PY_VERSION_NUMBER)
 
 def send_nonce_signal(): send_signal("nonce")
 
@@ -619,62 +574,286 @@ def CLOSE_CONN():
 
 
 
-def wait_for_sync():
+def wait_for_sync(initial_sync=False):
 	global SOCKET_CONN
 
-	CONN_DAT = RECV_DATA().split("\n")
+	while True:
 
-	if CONN_DAT[0] == "sync":
-		send_ack_signal()
-		CONN_DAT = '\n'.join(CONN_DAT[1:])
+		if initial_sync:
+			SOCKET_CONN.settimeout(0.5)
+		else:
+			SOCKET_CONN.settimeout(10)
+		
+		failed = False
+		try:
+			CONN_DAT = RECV_DATA(block=True).split("\n")
+		except socket.timeout:
+			failed = True
+
+		if failed: 
+			SOCKET_CONN.settimeout(None)
+			raise Exception("Socket took too long to respond.")
+
+		if CONN_DAT[0] == "sync":
+			send_ack_signal()
+			CONN_DAT = '\n'.join(CONN_DAT[1:])
+			break
+
+		#else:
+		#	raise ValueError("NOT SYNC: " + CONN_DAT[0])
+
+	SOCKET_CONN.settimeout(None)
 
 
+
+
+def match_lua_id(lua_version=LUA_VERSION_NUMBER):
+
+	global SOCKET_CONN
+
+	e_what = ""
+
+
+	send_id_signal()
+
+	d = ""
+	try:
+		SOCKET_CONN.settimeout(0.1)
+		d += RECV_DATA().split('\n')[0]
+	except Exception as e:
+		e_what = str(e)
+
+	if e_what != "": raise Exception(e_what)
+
+	SOCKET_CONN.settimeout(None)
+
+	if d != "ID_BVLUA_" + lua_version: raise ZeroDivisionError()
+
+	return d
+
+
+
+
+
+
+#def toGL_X(x):
+#	return x/(WINDOW_WIDTH/2) - 0.5
+#def toGL_Y(y):
+#	return -y/(WINDOW_HEIGHT/2) + 0.5
+
+
+
+def cnvGL_X(x): return (x*2)-1
+def cnvGL_Y(y): return -(y*2)+1
+
+def glb2GL_X(x): return cnvGL_X(x/WINDOW_WIDTH)
+def glb2GL_Y(y): return cnvGL_Y(y/WINDOW_HEIGHT)
+def glb2GL_W(w): return (w/WINDOW_WIDTH)*2
+def glb2GL_H(h): return (h/WINDOW_HEIGHT)*-2
+
+
+def map2disp_X(m_x): return screen.x + screen.SCALE * (m_x * screen.DEFAULT_WIDTH/MAP_W)
+def map2disp_Y(m_y): return screen.y + screen.SCALE * (m_y * screen.DEFAULT_HEIGHT/MAP_H)
+
+
+def disp2map_X(m_x): return screen.INV_SCALE*(-screen.x + m_x) * MAP_W/screen.DEFAULT_WIDTH
+def disp2map_Y(m_y): return screen.INV_SCALE*(-screen.y + m_y) * MAP_H/screen.DEFAULT_HEIGHT
+
+
+def map2GL_X(x): return glb2GL_X(map2disp_X(x))
+def map2GL_Y(y): return glb2GL_Y(map2disp_Y(y))
+
+
+
+
+
+
+
+
+
+
+
+def renderSurface(surf, pos=None, dim=None, rot=None, centered=False):	# SHOULD NEVER NEED TO BE USED ANYMORE!!
+	#global GL_CNV_ID
+
+	if pos == None:
+		_x = 0
+		_y = 0
 	else:
-		raise ValueError("NOT SYNC: " + CONN_DAT[0])
+		_x,_y = pos
+
+	if dim == None:
+		r = surf.get_rect()
+		_w = r.width
+		_h = r.height
+	else:
+		_w,_h = dim
+
+	if rot == None:
+		_a1 = 0
+		_a2 = 0
+		_a3 = 0
+	else:
+		_a1, _a2, _a3 = rot
+
+	Assets.surfToGLTex(surf)
+
+	renderTexture(Assets.GL_CNV_ID, (_x,_y), (_w,_h), (_a1, _a2, _a3), centered=centered)
 
 
 
 
 
+def renderTexture(texID, pos=None, dim=None, rot=None, centered=False):
+
+	if pos == None:
+		_x = 0
+		_y = 0
+	else:
+		_x,_y = pos
+
+	if dim == None:
+		_w = WINDOW_WIDTH
+		_h = WINDOW_HEIGHT
+	else:
+		_w,_h = dim
+
+	if rot == None:
+		_a1 = 0
+		_a2 = 0
+		_a3 = 0
+	else:
+		_a1, _a2, _a3 = rot
 
 
-
-def do_frame_update(root, CANVAS):
-
-	send_frame_signal()
-	update_window(root, CANVAS)
 	
 
-def update_window(root, CANVAS):
-	pygame.display.update(CANVAS.get_rect())
-	root.update()
+	c_x = _x
+	c_y = _y
+
+
+	if not centered:
+		c_x += _w/2
+		c_y += _h/2
+
+	glDisable(GL_LIGHTING)
+	glEnable(GL_TEXTURE_2D)
+
+
+	glMatrixMode(GL_MODELVIEW)
+
+	glPushMatrix()
+
+	#glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
+	
+	
+	
+	glLoadIdentity()
+
+	glTranslatef(glb2GL_X(c_x), glb2GL_Y(c_y), 0)
+
+	#glRotatef(_a1, 1, 0, 0)
+	#glRotatef(_a2, 0, 1, 0)
+	glRotatef(_a3, 0, 0, 1)
+
+	glTranslatef(glb2GL_W(WINDOW_WIDTH/2),  glb2GL_H(WINDOW_HEIGHT/2), 0)
+
+	glBindTexture(GL_TEXTURE_2D, texID)
+	
+	
+	glBegin(GL_QUADS)
+	
+
+	if centered:
+		glTexCoord2f(0, 0); glVertex2f(glb2GL_X(0-_w/2), glb2GL_Y(0-_h/2)) # top-left
+		glTexCoord2f(0, 1); glVertex2f(glb2GL_X(0-_w/2), glb2GL_Y(0+_h/2)) # bottom-left
+		glTexCoord2f(1, 1); glVertex2f(glb2GL_X(0+_w/2), glb2GL_Y(0+_h/2)) # bottom-right
+		glTexCoord2f(1, 0); glVertex2f(glb2GL_X(0+_w/2), glb2GL_Y(0-_h/2)) # top-right
+	else:
+		glTexCoord2f(0, 0); glVertex2f(glb2GL_W(0-_w/2), glb2GL_H(0-_h/2)) # top-left
+		glTexCoord2f(0, 1); glVertex2f(glb2GL_W(0-_w/2), glb2GL_H(0+_h/2)) # bottom-left
+		glTexCoord2f(1, 1); glVertex2f(glb2GL_W(0+_w/2), glb2GL_H(0+_h/2)) # bottom-right
+		glTexCoord2f(1, 0); glVertex2f(glb2GL_W(0+_w/2), glb2GL_H(0-_h/2)) # top-right
+
+	glEnd()
+
+	glPopMatrix()
+
+	glDisable(GL_TEXTURE_2D)
+
+
+
+
+
+def renderObject(texID, pos=None, dim=None, rot=None, centered=True):
+	renderTexture(texID, pos=pos, dim=dim, rot=rot, centered=centered)
+
+
+
+
+
+def do_frame_update():
+	send_frame_signal()
+	update_window()
+	
+
+
+def update_window():
+	
+
+	#T = time.perf_counter()
+	
+	# ============================
+	BV.root.update() 
+
+
+
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0)
+	glDisable(GL_DEPTH_TEST)
+
+
+
+	glDrawBuffer(GL_FRONT)
+		
+	glClearColor(1.0, 1.0, 1.0, 1.0)
+	glClear(GL_COLOR_BUFFER_BIT)
+	glLoadIdentity()
+
+	glUseProgram(SCREEN_SHADER)
+	glBindVertexArray(SCREEN_VAO)
+	glBindTexture(GL_TEXTURE_2D, FBO_TEX)
+	glDrawArrays(GL_TRIANGLES, 0, 6)
+	glUseProgram(0)
+
+
+	glFlush()
+
+	glDrawBuffer(GL_BACK)
+
+
+	glBindFramebuffer(GL_FRAMEBUFFER, FBO_0)
+
+
+
+
+	glClearColor(0.0, 0.0, 0.0, 0.0)
+	glClear(GL_COLOR_BUFFER_BIT)
+	glLoadIdentity()
+
+	
+	# ============================
+
+	#T = time.perf_counter()
 
 	wait_for_sync()
 
-	sync_frame()
+	#T_0 = time.perf_counter() - T
 
+	#print(100 * T_0 * 60)
+	
+	
 
-def sync_frame():
-	global CURR_TIME
-
-
-	time_left = spf - (time.clock() - CURR_TIME)
-
-	#if time_left < -0.001:
-	#	print(int(-10000 * time_left))
-
-	while time.clock() - CURR_TIME < spf * 0.9:
-		i = 1 # dummy
-
-	CURR_TIME = time.clock()
-
-
-
-def wait(t):
-	now = time.clock()
-
-	while time.clock() < now + t:
-		i = 1 # dummy
 
 
 
@@ -688,143 +867,121 @@ def wait(t):
 M7_TILES = None
 TILEMAP = None
 
+TILEMAP_TEX = None
+CPMAP_TEX = None
+FLOWMAP_TEX = None
 
 
-def make_map_images(m_data, t_data, p_data, c_data, f_data):
+
+def make_map_textures(m_data, t_data, p_data, z_data, f_data, c_data, THREADED=False):
 	
-	global map_screen
-	global cp_screen
-	global dir_screen
-
-
-	global map_screen_SMALL
-	global cp_screen_SMALL
-	global dir_screen_SMALL
-
-
 	global M7_TILES
 	global TILEMAP
+	global ZONEMAP
+	global FLOWMAP
 	global map_ready
 
+	global TILESET_IMAGE
+	global TILEMAP_IMAGE
+	global ZONEMAP_IMAGE
+	global FLOWMAP_IMAGE
 
-
-	resize_size = (512, 512)
-	#small_size = (1024, 1024)
 
 
 	TILEMAP, M7_TILES = TrackHelper.get_tilemap_from_data(
-														m_data,		# tilemap data 
-														t_data, 	# tileset image data
-														p_data)		# palette data
+		m_data,		# tilemap data 
+		t_data, 	# tileset image data
+		p_data		# palette data
+	)
 
+	ZONEMAP, FLOWMAP = TrackHelper.get_cpmap_flowmap_from_data(
+		z_data, 	# checkpoint bound data
+		f_data,		# flowmap data
+		c_data		# checkpoint attribute data
+	)
 
-	map_screen = TILEMAP.copy()
-	map_screen_SMALL = pygame.transform.smoothscale(
-											TILEMAP, 			# 1024x1024 Mode7 Image
-											resize_size)		# size to resize to
-
-
-	cp, flow = TrackHelper.get_cpmap_flowmap_from_data(
-													c_data, 	# checkpoint bound data
-													f_data)		# flowmap data
-
-	cp_screen = cp.copy()
-	dir_screen = flow.copy()
-
-	cp_screen_SMALL = pygame.transform.smoothscale(cp, resize_size)
-	dir_screen_SMALL = pygame.transform.smoothscale(flow, resize_size)
-
-
-	update_map_images()
+	update_map_textures(THREADED=THREADED)
 
 	map_ready = True
 
 
 
-def update_map_images():
-
-	global map_screen
-	global cp_screen
-	global dir_screen
-
-	global full_map
-	global map_cp
-	global map_flow
-
-	global map_screen_SMALL
-	global cp_screen_SMALL
-	global dir_screen_SMALL
-
-	global full_map_SMALL
-	global map_cp_SMALL
-	global map_flow_SMALL
-
-
-
-	#map_screen = pygame.transform.smoothscale(TILEMAP, (width, height))
-
-	map_cp = map_screen.copy()
-	map_cp.blit(cp_screen, (0, 0))
-
-	map_flow = map_screen.copy()
-	map_flow.blit(dir_screen, (0, 0))
-
-	full_map = map_cp.copy()
-	full_map.blit(dir_screen, (0, 0))
-
-
-	map_cp_SMALL = map_screen_SMALL.copy()
-	map_cp_SMALL.blit(cp_screen_SMALL, (0, 0))
-
-	map_flow_SMALL = map_screen_SMALL.copy()
-	map_flow_SMALL.blit(dir_screen_SMALL, (0, 0))
-
-	full_map_SMALL = map_cp_SMALL.copy()
-	full_map_SMALL.blit(dir_screen_SMALL, (0, 0))
 
 
 
 
 
-MAP_SCALE = 1024 / width
+
+
+def create_surface_from_buff(buff, in_dim=(0, 0), ALPHA=True):
+
+
+	frmt = "RGB"
+	if ALPHA: frmt = "RGBA"
+
+	return pygame.image.frombuffer(buff, in_dim, frmt)
+
+
+
+
+
+
+
+
+
+
+def update_map_textures(THREADED=False):
+
+	if not THREADED: update_tilemap()
+
+
+def update_tilemap():
+	global TILEMAP_TEX
+	
+	TILEMAP_TEX = Assets.buffToGLTex(TILEMAP, (1024, 1024), TILEMAP_TEX, ALPHA=False)
+
+
+def update_zone_flow():
+	global ZONEMAP_TEX
+	global FLOWMAP_TEX
+
+	ZONEMAP_TEX = Assets.buffToGLTex(ZONEMAP, (1024, 1024), ZONEMAP_TEX, ALPHA=True)
+	FLOWMAP_TEX = Assets.buffToGLTex(FLOWMAP, (1024, 1024), FLOWMAP_TEX, ALPHA=True)
+
+
+
+
+
 
 
 def update_map_data(update_data):
+	"""Updates the texture data for the map given a list of tile offsets and tile values""" 
+
+	for offs, val in update_data: update_map_tile(offs % 128, offs // 128, val)
+
+	if update_data != []: update_map_textures()	# only update map if updates happen
+		
+
+
+
+
+def update_map_tile(TILE_X, TILE_Y, TILE_NUM):
+	"""Updates the texture data for the map for a given tile. DOES NOT UPDATE THE TEXTURE ITSELF!!"""
 
 	global TILEMAP
-	global map_screen
-	global map_screen_SMALL
 
 
+	M7_TILE_DATA = M7_TILES[TILE_NUM]
 
-	for offs, val in update_data:
-		#print(offs, val)
-		
-		TILE_X = offs % 128
-		TILE_Y = offs // 128
+	for j in range(8):
+		TM_Y = TILE_Y*8 + j
+		TL_Y = j
 
-		TILE = M7_TILES[val]
-
-		map_screen.blit(
-			pygame.transform.smoothscale(
-				TILE,	# tile image 
-				(8, 8)	# image size
-			), 
-			(round(TILE_X*8), round(TILE_Y*8))	# position to blit
-		)
-
-		map_screen_SMALL.blit(
-			pygame.transform.smoothscale(
-				TILE,	# tile image 
-				(4, 4)	# image size
-			), 
-			(round(TILE_X*4), round(TILE_Y*4))	# position to blit
-		)
-		
-
-	if update_data != []: update_map_images()	# only update map if updates happen
-		
-	
+		for i in range(8):
+			TM_X = TILE_X*8 + i
+			TL_X = i
+			for p in range(3): #RGB
+				TILEMAP[((TM_Y * 1024) + TM_X)*3 + p] = M7_TILE_DATA[((TL_Y * 8) + TL_X)*3 + p]
 
 
 
@@ -833,126 +990,107 @@ def update_map_data(update_data):
 
 
 def setup_map_socket():
-	global map_screen
-	global cp_screen
-	global dir_screen
 
-	global full_map
-	global map_cp
-	global map_flow
 	global map_ready
 
-	
+
+	#T = time.perf_counter()
+
+	#T0 = time.perf_counter() - T
+
+	#print("TIME:", 60 * T0 * 100)
+
+
 
 	# PALETTE DATA
-	#conn.send(b"PALETTE\n")
-	send_palette_signal()
-
-	CONN_DAT = RECV_DATA().split("\n")
 	
+	send_palette_signal()
+	CONN_DAT = RECV_DATA().split("\n")
+
 
 	P_DAT  = CONN_DAT[0]
-	p_data = [int("0x" + P_DAT[i*2:(i+1)*2], 16) for i in range(len(P_DAT)//2)]
-
-	#print("Finished palette")
-	#print("Pal len: ", format(len(p_data), "04x"))
+	p_data = bytes.fromhex(P_DAT)
 
 
 
 
 
-
+	
 
 	# TILE DATA 
-	#conn.send(b"TILES\n")
+	
 	send_tileset_signal()
-	#print("in Tiles")
-	#conn.recv(8192)
 	T_DAT = ""
 
-	for i in range(16):
-
+	for i in range(8):
 		T_DAT += RECV_DATA().split("\n")[0]
-		#conn.send(b"nonce\n")
 		send_nonce_signal()
 
-	'''
-	T_DAT  = conn.recv(8192).decode("ascii").split("\n")[0]
-	conn.send(b"nonce\n")
-	T_DAT += conn.recv(8192).decode("ascii").split("\n")[0]
-	conn.send(b"nonce\n")
-	T_DAT += conn.recv(8192).decode("ascii").split("\n")[0]
-	conn.send(b"nonce\n")
-	T_DAT += conn.recv(8192).decode("ascii").split("\n")[0]
-	'''
-
-	t_data = [int("0x" + T_DAT[i*2:(i+1)*2], 16) for i in range(len(T_DAT)//2)][1::2]
-
-	#print("Finished tiles")
-	#print("Tile len: ", format(len(t_data), "04x"))
-
-
-
+	t_data = bytes.fromhex(T_DAT)
 
 
 
 
 
 	# MAP DATA
-	#conn.send(b"TRACK\n")
+	
 	send_tilemap_signal()
-	#print("in Track")
-	#conn.recv(8192)
-
-
 	M_DAT = ""
 
 	for i in range(8):
-
 		M_DAT += RECV_DATA().split("\n")[0]
 		send_nonce_signal()
 
-	m_data = [int("0x" + M_DAT[i*2:(i+1)*2], 16) for i in range(len(M_DAT)//2)]
+	m_data = bytes.fromhex(M_DAT)
 
 
 
 
 
+	# ZONE DATA
 
-	# CP DATA
-	#conn.send(b"CP_DATA\n")
-	send_cp_data_signal()
-
-	C_DAT = ""
+	send_zonemap_signal()
+	Z_DAT = ""
 
 	for i in range(2):
-		C_DAT += RECV_DATA().split("\n")[0]
-		#conn.send(b"nonce\n")
+		Z_DAT += RECV_DATA().split("\n")[0]
 		send_nonce_signal()
 
-	c_data = [int("0x" + C_DAT[i*2:(i+1)*2], 16) for i in range(len(C_DAT)//2)]
+	z_data = bytes.fromhex(Z_DAT)
+
 
 
 
 	# FLOW DATA
-	#conn.send(b"FLOW\n")
-	send_flowmap_signal()
 
+	send_flowmap_signal()
 	F_DAT = ""
 
 	for i in range(2):
 		F_DAT += RECV_DATA().split("\n")[0]
-		#conn.send(b"nonce\n")
 		send_nonce_signal()
 
-	f_data = [int("0x" + F_DAT[i*2:(i+1)*2], 16) for i in range(len(F_DAT)//2)]
+	f_data = bytes.fromhex(F_DAT)
+
+
+
+	# ZONE ATTRIBUTES
+
+	send_cp_data_signal()
+	C_DAT = RECV_DATA().split("\n")[0]
+	c_data = bytes.fromhex(C_DAT)
+
+
+
+
 
 
 
 
 	map_ready = False
-	map_thread = threading.Thread(target=make_map_images, args=(m_data, t_data, p_data, c_data, f_data))
+	map_thread = threading.Thread(target=make_map_textures, args=(m_data, t_data, p_data, z_data, f_data, c_data, True))
 	map_thread.start()
+
 
 
 
@@ -960,6 +1098,631 @@ def setup_map_socket():
 
 
 
+def elapsed_time(reset=False):
+	global _TIME
+
+	t = time.perf_counter()
+	e = t - _TIME
+
+	if reset: _TIME = time.perf_counter()
+
+	return e
+
+
+
+
+
+
+
+
+def GENERATE_TEXTURES():
+	global TILEMAP_TEX
+	global ZONEMAP_TEX
+	global FLOWMAP_TEX
+
+
+	#global GL_CNV_ID
+
+	TILEMAP_TEX = glGenTextures(1)
+	ZONEMAP_TEX = glGenTextures(1)
+	FLOWMAP_TEX = glGenTextures(1)
+
+	
+	#GL_CNV_ID = glGenTextures(1)
+
+
+
+	Assets.create_GL_textures()
+
+
+
+def GEN_VBO():
+	global VBO1
+	global VBO2
+
+	global VAO1
+
+	VBO1 = glGenBuffers(1)
+	VBO2 = glGenBuffers(1)
+
+	VAO1 = glGenVertexArrays(1)
+
+
+def GEN_FBO():
+	global FBO_TEX
+	global FBO_0
+	global RBO_0
+
+
+	global SCREEN_VAO
+	global SCREEN_VERTS
+
+	
+	SCREEN_TRI_COORDS = [
+		-1, 1, 
+		-1, -1, 
+		1, -1,
+
+		-1, 1, 
+		1, -1, 
+		1, 1
+	]
+
+	SCREEN_TEX_COORDS = [
+		0, 1, 
+		0, 0, 
+		1, 0,
+		
+		0, 1, 
+		1, 0, 
+		1, 1
+	]	
+
+	SCREEN_VAO = glGenVertexArrays(1)
+	SCREEN_VBO1 = glGenBuffers(1)
+	SCREEN_VBO2 = glGenBuffers(1)
+
+	glBindVertexArray(SCREEN_VAO)
+	glBindBuffer(GL_ARRAY_BUFFER, SCREEN_VBO1)
+	glBufferData(GL_ARRAY_BUFFER, len(SCREEN_TRI_COORDS)*4, (c_float*len(SCREEN_TRI_COORDS))(*SCREEN_TRI_COORDS), GL_STATIC_DRAW)
+	glEnableVertexAttribArray(0)
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, None)
+	glBindBuffer(GL_ARRAY_BUFFER, SCREEN_VBO2)
+	glBufferData(GL_ARRAY_BUFFER, len(SCREEN_TEX_COORDS)*4, (c_float*len(SCREEN_TEX_COORDS))(*SCREEN_TEX_COORDS), GL_STATIC_DRAW)
+	glEnableVertexAttribArray(1)
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, None)
+
+
+	FBO_0 = glGenFramebuffers(1)
+	glBindFramebuffer(GL_FRAMEBUFFER, FBO_0)
+
+	FBO_TEX = glGenTextures(1)
+	glBindTexture(GL_TEXTURE_2D, FBO_TEX)
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, WINDOW_WIDTH, WINDOW_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, None)
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, FBO_TEX, 0)
+
+	
+	RBO_0 = glGenRenderbuffers(1)
+	glBindRenderbuffer(GL_RENDERBUFFER, RBO_0)
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, WINDOW_WIDTH, WINDOW_HEIGHT)
+	glBindRenderbuffer(GL_RENDERBUFFER, 0)
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, RBO_0)
+
+	if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE: print("[WARNING] GL FRAMEBUFFER NOT COMPLETE")
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0)
+	#glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+
+	glUseProgram(SCREEN_SHADER)
+	glUniform1i(screen_tex_screenTexture, 0) # ?
+	glUseProgram(0)
+
+
+
+
+def GEN_RBO():
+	global RBO_0
+
+	#RBO_0 = glGenRenderbuffers(1)
+	pass
+
+
+
+def GEN_SHADERS():
+	###################################################################################
+	##### TRAIL SHADER
+	###################################################################################
+	global TRAIL_VERTEX_SHADER
+	global TRAIL_FRAGMENT_SHADER
+	global TRAIL_SHADER
+	###################################################################################
+	
+	TRAIL_VERTEX_SHADER = shaders.compileShader("""
+		#version 460
+
+		layout(std430, binding = 0) buffer TVertex
+		{
+		   float vert_data[];
+		};
+
+		uniform float S_w;
+		uniform float S_h;
+		uniform float S_x;
+		uniform float S_y;
+		uniform float W_w;
+		uniform float W_h;
+
+		uniform float spd_min;
+		uniform float spd_max;
+
+		uniform float line_width;
+
+		out vec3 vout_color;
+
+
+
+		float toGL_X(float x)
+		{
+			return 2 * ((S_x + S_w * x) / W_w) - 1;
+		}
+
+		float toGL_Y(float y)
+		{
+			return -1 * (2 * ((S_y + S_h * y) / W_h) - 1);
+		}
+
+
+
+		void main()
+		{
+
+			int line_i = gl_VertexID / 6;
+			int tri_i = gl_VertexID % 6;
+
+
+
+			vec4 va[4];
+			int line_ind = line_i * 3;
+
+			va[0] = vec4(toGL_X(vert_data[line_ind+0]), toGL_Y(vert_data[line_ind+1]), 0.0f, 1.0f);
+			va[1] = vec4(toGL_X(vert_data[line_ind+3]), toGL_Y(vert_data[line_ind+4]), 0.0f, 1.0f);
+			va[2] = vec4(toGL_X(vert_data[line_ind+6]), toGL_Y(vert_data[line_ind+7]), 0.0f, 1.0f);
+			va[3] = vec4(toGL_X(vert_data[line_ind+9]), toGL_Y(vert_data[line_ind+10]), 0.0f, 1.0f);
+
+
+			vec2 v_line  = normalize(va[2].xy - va[1].xy);
+		    vec2 nv_line = vec2(-v_line.y, v_line.x);
+
+
+			vec4 pos;
+			float col;
+
+			
+			if (tri_i == 0 || tri_i == 1 || tri_i == 3)
+			{
+			    vec2 v_pred  = normalize(va[1].xy - va[0].xy);
+			    vec2 v_miter = normalize(nv_line + vec2(-v_pred.y, v_pred.x));
+
+			    pos = va[1];
+			    pos.xy += v_miter * line_width * 2 * (tri_i == 1 ? -0.5 : 0.5) / dot(v_miter, nv_line);
+
+			    col = vert_data[line_ind+5];
+			}
+			else
+			{
+			    vec2 v_succ  = normalize(va[3].xy - va[2].xy);
+			    vec2 v_miter = normalize(nv_line + vec2(-v_succ.y, v_succ.x));
+
+			    pos = va[2];
+			    pos.xy += v_miter * line_width * 2 * (tri_i == 5 ? 0.5 : -0.5) / dot(v_miter, nv_line);
+
+			    col = vert_data[line_ind+8];
+			}
+
+
+		    gl_Position = pos;
+
+
+		    // color calculation
+		    float max2 = spd_max - spd_min;
+
+			col = (clamp(col, spd_min, spd_max) - spd_min) / max2;
+
+			col = clamp(col, 0.1, 0.9);
+
+			// set hue
+			vec3 c = vec3((1 - col) / 3, 1.0f, 1.0f);
+
+			// hsv to rgb
+			vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+			vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+
+		    vout_color = c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+		}
+		""", GL_VERTEX_SHADER)
+
+	TRAIL_FRAGMENT_SHADER = shaders.compileShader("""
+		#version 460
+		
+		in vec3 vout_color;
+		out vec4 fragColor;
+
+		void main()
+		{
+		    fragColor = vec4(vout_color, 1.0);
+		}
+		""", GL_FRAGMENT_SHADER)
+
+
+	TRAIL_SHADER = shaders.compileProgram(TRAIL_VERTEX_SHADER, TRAIL_FRAGMENT_SHADER)
+	###################################################################################
+	global trail_S_w
+	global trail_S_h
+	global trail_S_x
+	global trail_S_y
+	global trail_W_w
+	global trail_W_h
+
+	global trail_spd_min
+	global trail_spd_max
+	global trail_line_width
+
+	trail_S_w = glGetUniformLocation(TRAIL_SHADER, "S_w")
+	trail_S_h = glGetUniformLocation(TRAIL_SHADER, "S_h")
+	trail_S_x = glGetUniformLocation(TRAIL_SHADER, "S_x")
+	trail_S_y = glGetUniformLocation(TRAIL_SHADER, "S_y")
+	trail_W_w = glGetUniformLocation(TRAIL_SHADER, "W_w")
+	trail_W_h = glGetUniformLocation(TRAIL_SHADER, "W_h")
+
+	trail_spd_min = glGetUniformLocation(TRAIL_SHADER, "spd_min")
+	trail_spd_max = glGetUniformLocation(TRAIL_SHADER, "spd_max")
+	trail_line_width = glGetUniformLocation(TRAIL_SHADER, "line_width")
+	###################################################################################
+
+
+
+	###################################################################################
+	##### SCREEN RENDER SHADER
+	###################################################################################
+	global SCREEN_VERTEX_SHADER
+	global SCREEN_FRAGMENT_SHADER
+	global SCREEN_SHADER
+	###################################################################################
+	SCREEN_VERTEX_SHADER = shaders.compileShader("""
+		#version 330 core
+		layout (location = 0) in vec2 aPos;
+		layout (location = 1) in vec2 aTexCoords;
+
+		out vec2 TexCoords;
+
+		void main()
+		{
+			TexCoords = aTexCoords;
+			gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0); 
+		}
+		""", GL_VERTEX_SHADER)
+
+
+
+	SCREEN_FRAGMENT_SHADER = shaders.compileShader("""
+		#version 330 core
+		out vec4 FragColor;
+
+		in vec2 TexCoords;
+
+		uniform sampler2D screenTexture;
+
+		void main()
+		{
+			vec3 col = texture(screenTexture, TexCoords).rgb;
+			FragColor = vec4(col, 1.0);
+		} 
+
+
+		""", GL_FRAGMENT_SHADER)
+
+
+
+	SCREEN_SHADER = shaders.compileProgram(SCREEN_VERTEX_SHADER, SCREEN_FRAGMENT_SHADER)
+	###################################################################################
+	global screen_tex_screenTexture
+
+	screen_tex_screenTexture = glGetUniformLocation(SCREEN_SHADER, "screenTexture")
+	###################################################################################
+
+	
+
+
+def SHOW_TRAIL_LINES():
+
+	LW = max(1, screen.w / MAP_W)
+	
+
+
+	glUseProgram(TRAIL_SHADER)
+
+	glUniform1f(trail_S_w, screen.SCALE * screen.DEFAULT_WIDTH / MAP_W)
+	glUniform1f(trail_S_h, screen.SCALE * screen.DEFAULT_HEIGHT / MAP_H)
+	glUniform1f(trail_S_x, screen.x)
+	glUniform1f(trail_S_y, screen.y)
+	glUniform1f(trail_W_w, WINDOW_WIDTH)
+	glUniform1f(trail_W_h, WINDOW_HEIGHT)
+
+
+	glUniform1f(trail_spd_min, MIN_SPD)
+	glUniform1f(trail_spd_max, MAX_SPD)
+
+	glUniform1f(trail_line_width, LW/WINDOW_WIDTH)
+
+
+	glBindVertexArray(VAO1)
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, VBO1)
+
+	for i in range(7, -1, -1):
+
+		if not OBJECTS[i].show_trails: continue
+
+
+		pos = [x+0 for x in OBJECTS[i].prev_positions]
+		c_len = OBJECTS[i].trail_cbuff_len + 1
+		L = c_len*3
+
+		if L == 0: continue
+
+		pos.append(OBJECTS[i].x)
+		pos.append(OBJECTS[i].y)
+		pos.append(OBJECTS[i].speed)
+
+		
+		glBufferData(GL_SHADER_STORAGE_BUFFER, L*4, (c_float*L)(*pos), GL_STATIC_DRAW)
+
+
+
+		N = c_len - 2
+
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, VBO1)
+
+		glDrawArrays(GL_TRIANGLES, 0, max(0, 6*(N-1)))
+
+		
+
+
+		#glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+
+
+
+
+		#######################################################################################
+
+	glUseProgram(0)
+
+	#glFlush()		# enable if getting weird clipping!!
+
+	'''
+	for i in range(7, -1, -1):
+
+		if not OBJECTS[i].show_trails: continue
+
+		OBJECTS[i].prev_positions.pop()
+		OBJECTS[i].prev_positions.pop()
+		OBJECTS[i].prev_positions.pop()
+	'''
+
+	
+
+
+
+
+
+
+
+
+
+DEG_2_RAD = math.pi / 180
+RAD_2_DEG = 180 / math.pi
+
+
+
+
+
+
+
+
+
+
+
+
+VECTOR_SCALE = 32
+NUM_WIDTHS = 3
+VEC_W = 2
+
+
+
+CAM_POS = (0, 0)
+C_MODE = 0
+
+
+
+cam_scl_a = 8
+cam_scl_b = 0
+
+C_SCL = 8
+
+CAM_WIDTH = 32 # idk why this works but it does
+CAM_LINE_ALPHA = 0.5
+
+A_VEL_SEGMENTS = 3
+
+
+
+
+
+
+
+
+
+ls_numl = 0
+ls_vdata = []
+ls_cdata = []
+
+
+
+def is_active_racer(racer_num):
+
+	if racer_num > 7: return False
+
+	# GP mode
+	if gametype == 0: return True
+
+	# Not GP-mode, so only racers 0 and 1 can possibly be active
+	if racer_num > 1: return False
+
+	# Match Race or Battle Mode
+	if gametype == 2 or gametype == 6: return True
+
+	# Time Trial [gametype == 4] (Need to check ghost)
+	if C_MODE == 0: return True# both screens active (shouldn't happen in base game, but for mod support)
+	elif C_MODE == 2: # top screen active only
+		# racer 0 is player
+		if racer_num == 0: return True
+
+		# racer 1: check if should show ghost racer
+		if BV.SHOW_GHOST and not BV.REPLAY_MODE: return True
+
+		# racer 1: either ghost not enabled, or ghost enabled and in replay mode
+		return False
+
+	elif C_MODE == 4: # bottom screen active only
+		# racer 1 is player
+		if racer_num == 1: return True
+
+		# racer 0: check if should show ghost racer
+		if BV.SHOW_GHOST and not BV.REPLAY_MODE: return True
+
+		# racer 0: either ghost not enabled, or ghost enabled and in replay mode
+		return False
+
+
+	return False
+
+
+
+def racer_has_camera(racer_num):
+	return (C_MODE == 0 and racer_num < 2) or (C_MODE == 2 and racer_num == 0) or (C_MODE == 4 and racer_num == 1)
+
+
+
+
+
+
+MAX_SPD = 0x100
+MIN_SPD = 0xc0
+
+
+
+
+
+
+
+
+
+
+
+def init_tk():
+	# ============================ Tkinter setup stuff ================================
+
+	global BV
+
+
+
+
+
+
+	# setup window
+
+	BV = BVmain.BV_Instance(WINDOW_SIZE=(WINDOW_WIDTH, WINDOW_HEIGHT), PYG_SIZE=(width, height))
+
+
+	os.environ['SDL_WINDOWID'] = str(BV.embed.winfo_id())
+
+	if platform.system() == "Windows":					# system()???
+		os.environ['SDL_VIDEODRIVER'] = 'windib'
+
+	BV.setup_window()
+
+
+
+	# =================================================================================
+
+
+
+
+
+
+
+
+def init_pygame():
+	# ============================ Pygame setup stuff =================================
+	global GL_CANVAS
+	global screen
+	global font
+
+	pygame.init()
+
+	pg_flags = DOUBLEBUF | OPENGL
+
+	GL_CANVAS = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pg_flags)
+
+	Assets.create_pygame_images()
+	
+	TrackHelper.gen_arrow_images()
+	TrackHelper.gen_cp_tiles()
+
+
+	screen = KS.Screen((WINDOW_WIDTH, WINDOW_HEIGHT))
+
+	font = None
+	# =================================================================================
+
+
+def init_gl():
+	# ============================ OpenGL setup stuff =================================
+	
+
+
+	glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
+	glDepthRange(0, 1)
+	glMatrixMode(GL_PROJECTION)
+	#gluPerspective(0, (WINDOW_WIDTH/WINDOW_HEIGHT), 0.1, 50.0)
+	#view_mat = IndentityMat44()
+	glMatrixMode(GL_MODELVIEW)
+	glLoadIdentity()
+	glShadeModel(GL_SMOOTH)
+	glClearColor(0.0, 0.0, 0.0, 0.0)
+	glClearDepth(1.0)
+	glDisable(GL_DEPTH_TEST)
+	glDisable(GL_LIGHTING)
+	glDepthFunc(GL_LEQUAL)
+	glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST)
+	glEnable(GL_BLEND)
+	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA)
+
+
+	GEN_SHADERS()
+	GENERATE_TEXTURES()
+	GEN_VBO()
+	GEN_FBO()
+
+
+
+
+
+
+	glBindFramebuffer(GL_FRAMEBUFFER, FBO_0)
+
+	# =================================================================================
 
 
 
@@ -971,26 +1734,40 @@ def setup_map_socket():
 
 
 # ==================================================================================================
+#              MAIN
+# ==================================================================================================
+
+if platform.system() == "Windows":
+	# set windows tray icon (if using windows of course :p)
+	app_id = u'mrl314.booview.window.v20'
+	ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+
+print("====================================================")
+print("        Welcome to BooView (v" + PY_VERSION_NUMBER + ") by MrL314!        ")
+print("====================================================")
 
 
-
-
-print("#==================================================#")
-print("#       Welcome to BooView by MrL314 (v1.0)!       #")
-print("#==================================================#")
-
-root = None
 
 
 WINDOW_SCALE = 1
 
+FRAMES = 0
+
 data = b''
+
+BV = None
+
+CONN_LUA_V = ""
+CONN_NAME = ""
+
+print("\n# Please connect socket via BizHawk's Lua Console. #\n")
+
 while True:
-	print("\n# Please connect socket via BizHawk's Lua Console. #")
+
 	with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 		s.bind((HOST, PORT))
 		s.listen()
-		#print("Listening for connection on port %d..." % (PORT,))
+		
 		conn, addr = s.accept()
 
 		SOCKET_CONN = conn
@@ -999,224 +1776,89 @@ while True:
 
 
 		with conn:
-			#conn.settimeout(10)
+
+			_TIME = time.perf_counter()
+
 			try:
-				print('Connected by', addr[0])
 
 
-				# Pygame setup
+
+
+
+				# =================================
+				#    INIT
+				# =================================
+
+				#send_frame_signal()	# call "frame" once to set up
+
+				# check if lua socket properly connected
+				try: 
+					wait_for_sync(initial_sync=True)
+				except Exception as e:
+					print("[INFO] Connection failed. This occasionally happens when\n       starting up for the first time. Try reconnecting!")
+
+					try: CLOSE_CONN()
+					except ConnectionResetError: pass
+					except OSError: pass
+
+					continue
+
+
+				#_ = RECV_DATA() # dummy!
+
+
+
+				BAD_LUA_CONN = False
+
+				try: 
+					CONN_LUA_V = match_lua_id(lua_version=LUA_VERSION_NUMBER) # tell Lua that it is connected to the python script (better safe than sorry)
+				except ZeroDivisionError:
+					BAD_LUA_CONN = True
+				except Exception as e:
+					raise e
+
+				if BAD_LUA_CONN:
+					print("[ERROR] Could not verify identity of connected socket.\n        Please ensure you are using version " + LUA_VERSION_NUMBER + " of the LuaSide.lua script\n")
+					try: CLOSE_CONN()
+					except ConnectionResetError: pass
+					except OSError: pass
+
+					break
+
+				CONN_NAME = str(addr[0]) + " (" + str(CONN_LUA_V) + ")"
+
+				print('[INFO] ID: ID_BVPY_' + str(PY_VERSION_NUMBER))
+				print('[INFO] Connected to', CONN_NAME)
 
 				send_frame_signal()	# call "frame" once to set up
 				wait_for_sync()
 
-				CURR_TIME = time.clock()
+
+				send_yield_signal()
+
+
+				init_tk()
+				init_pygame()
+				init_gl()
+
+				send_unyield_signal()
 				
 
-
-
-				#pygame.display.set_caption("DetaSMK")
-				#pygame.display.set_icon(pygame.image.load('assets/icon.png'))
-
-
-				root = tk.Tk()
-				embed = tk.Frame(root, width=WINDOW_WIDTH, height=WINDOW_HEIGHT)
-				embed.grid(columnspan = (width), rowspan = height)   # check and fix?
-				embed.pack(side=LEFT)
-
-				os.environ['SDL_WINDOWID'] = str(embed.winfo_id())
-
-				if platform.system == "Windows":
-					os.environ['SDL_VIDEODRIVER'] = 'windib'
-
-			
-
-				root.title("BooView")
-				root.iconphoto(False, PhotoImage(file='assets/icon.png'))
-				root.resizable(False, False)
-
-				pygame.init()
-
-				font = None
-				
-				#font = pygame.font.Font("./assets/freesansbold.ttf", 12)
-
-
-				#clock = pygame.time.Clock()
-
-
-
-				# ======== default screen =========
-				map_img = pygame.Surface((1, 1))
-				map_screen = pygame.transform.scale(map_img, (width, height))
-				map_screen_SMALL = pygame.transform.scale(map_img, (512, 512))
-
-				CANVAS = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-				
-				#screen = KS.Screen(map_screen.get_size())
-				#screen = KS.Screen((1024, 1024))
-				###screen = KS.Screen((width, height))
-				screen = KS.Screen((512, 512))
-				#screen = KS.Screen((WINDOW_WIDTH, WINDOW_HEIGHT))
-
-				#WINDOW_SCALE = screen.DEFAULT_WIDTH / WINDOW_WIDTH
-				#WINDOW_SCALE = WINDOW_WIDTH / screen.DEFAULT_WIDTH
-				
-				BG = pygame.Surface((width, height))
-				BG.fill((0, 0, 0))
-
-				cp_image = pygame.Surface((1, 1))
-				dir_image = pygame.Surface((1, 1))
-
-
-				
-				cp_screen  = pygame.transform.scale(cp_image, (width, height))
-				dir_screen = pygame.transform.scale(dir_image, (width, height))
-
-				map_cp = map_screen.copy()
-				map_cp.blit(cp_screen, (0, 0))
-
-				map_flow = map_screen.copy()
-				map_flow.blit(dir_screen, (0, 0))
-
-				full_map = map_cp.copy()
-				full_map.blit(dir_screen, (0, 0))
-
-
-
-				cp_screen_SMALL  = pygame.transform.scale(cp_image, (512, 512))
-				dir_screen_SMALL = pygame.transform.scale(dir_image, (512, 512))
-
-				map_cp_SMALL = map_screen_SMALL.copy()
-				map_cp_SMALL.blit(cp_screen_SMALL, (0, 0))
-
-				map_flow_SMALL = map_screen_SMALL.copy()
-				map_flow_SMALL.blit(dir_screen_SMALL, (0, 0))
-
-				full_map_SMALL = map_cp_SMALL.copy()
-				full_map_SMALL.blit(dir_screen_SMALL, (0, 0))
-
-
-
-
-				scl = map_img.get_width()/map_screen.get_width()
 				map_ready = False
-				# =================================
-
+				map_changed = False
+				map_loading = False
 				
 				prev_gamemode = 0x02
 				prev_track_number = 0xff
 
+				ghost_mode_byte = -2
+				demo_byte = -2
 
 				done = False
-				show_checkpoints = False
-				show_directions = False
-
-				in_file_dialogue = False
-
-
-
 
 				
 
-				# ============================ Tkinter setup stuff ================================
-
-				button_width = 50
-				button_height = 50
-
-				Assets.create_tk_images()
-
-				
-
-				SIDE_FRAME = tk.Frame(root, width=SIDE_FRAME_WIDTH, height=WINDOW_HEIGHT)
-
-
-
-				REPLAY_BUTTON = tk.Button(SIDE_FRAME, text="Replay\nGhost", command=toggle_record_mode)
-				TRAIL_BUTTON  = tk.Button(SIDE_FRAME, text="Show\nTrails", command=toggle_trails)
-
-				CP_BUTTON   = tk.Button(SIDE_FRAME, text="Show\nZones", command=toggle_cp)
-				FLOW_BUTTON = tk.Button(SIDE_FRAME, text="Show\nFlows", command=toggle_flow)
-
-				#FOLLOW_TEXT = tk.Text(SIDE_FRAME, text=)
-
-				FOLLOW_FRAME = tk.LabelFrame(SIDE_FRAME, relief=GROOVE, text="FOLLOW RACER")
-
-				FOLLOW_1_BUTTON = tk.Button(FOLLOW_FRAME, image=Assets.EMPTY_TK, command=toggle_follow_1, width=button_width, height=button_height, relief=FLAT)
-				FOLLOW_2_BUTTON = tk.Button(FOLLOW_FRAME, image=Assets.EMPTY_TK, command=toggle_follow_2, width=button_width, height=button_height, relief=FLAT)
-				FOLLOW_3_BUTTON = tk.Button(FOLLOW_FRAME, image=Assets.EMPTY_TK, command=toggle_follow_3, width=button_width, height=button_height, relief=FLAT)
-				FOLLOW_4_BUTTON = tk.Button(FOLLOW_FRAME, image=Assets.EMPTY_TK, command=toggle_follow_4, width=button_width, height=button_height, relief=FLAT)
-				FOLLOW_5_BUTTON = tk.Button(FOLLOW_FRAME, image=Assets.EMPTY_TK, command=toggle_follow_5, width=button_width, height=button_height, relief=FLAT)
-				FOLLOW_6_BUTTON = tk.Button(FOLLOW_FRAME, image=Assets.EMPTY_TK, command=toggle_follow_6, width=button_width, height=button_height, relief=FLAT)
-				FOLLOW_7_BUTTON = tk.Button(FOLLOW_FRAME, image=Assets.EMPTY_TK, command=toggle_follow_7, width=button_width, height=button_height, relief=FLAT)
-				FOLLOW_8_BUTTON = tk.Button(FOLLOW_FRAME, image=Assets.EMPTY_TK, command=toggle_follow_8, width=button_width, height=button_height, relief=FLAT)
-
-				FOLLOW_BUTTONS = [FOLLOW_1_BUTTON, FOLLOW_2_BUTTON, FOLLOW_3_BUTTON, FOLLOW_4_BUTTON, FOLLOW_5_BUTTON, FOLLOW_6_BUTTON, FOLLOW_7_BUTTON, FOLLOW_8_BUTTON]
-
-				
-				SPRITE_SIZE_FRAME = tk.LabelFrame(SIDE_FRAME, relief=GROOVE, text="SPRITE SCALE")
-
-				SPRITE_SCALE_VAR = StringVar(root)
-
-				SPRITE_SIZE_WIDGET = tk.Spinbox(SPRITE_SIZE_FRAME, increment=1, from_=1, to=4, state='readonly', width=4 , justify=RIGHT, textvariable=SPRITE_SCALE_VAR)
-				SPRITE_SIZE_WIDGET.pack(side=TOP, fill=X)
-
-				SPRITE_SCALE_VAR.set("2")
-
-
-
-				SRAM_UPLOAD_BUTTON = tk.Button(SIDE_FRAME, text="Load SRAM File", command=set_in_file_dialogue)
-
-
-
-				SIDE_TABLE = [
-					[REPLAY_BUTTON, TRAIL_BUTTON],
-					[CP_BUTTON, FLOW_BUTTON],
-					[(FOLLOW_FRAME, 2)],
-					[(SPRITE_SIZE_FRAME, 2)],
-					[(SRAM_UPLOAD_BUTTON, 2)]
-					]
-
-				
-				FOLLOW_TABLE = [
-					[FOLLOW_1_BUTTON, FOLLOW_2_BUTTON],
-					[FOLLOW_3_BUTTON, FOLLOW_4_BUTTON],
-					[FOLLOW_5_BUTTON, FOLLOW_6_BUTTON],
-					[FOLLOW_7_BUTTON, FOLLOW_8_BUTTON]
-				]
-
-				row = 0
-				for button_row in FOLLOW_TABLE:
-					col = 0
-					for b in button_row:
-						if type(b) == type(tuple()):
-							b[0].grid(column = col, row = row, columnspan=b[1], sticky="NEWS")
-						else:
-							b.grid(column = col, row = row, sticky="NEWS")
-
-						col += 1
-
-					row += 1
-
-
-
-
-				row = 0
-				for button_row in SIDE_TABLE:
-					col = 0
-					for b in button_row:
-						if type(b) == type(tuple()):
-							b[0].grid(column = col, row = row, columnspan=b[1], sticky="NEWS")
-						else:
-							b.grid(column = col, row = row, sticky="NEWS")
-
-						col += 1
-
-					row += 1
-
-
-				SIDE_FRAME.pack(side=LEFT)
-
-				# =================================================================================
+				# =================================
 
 
 
@@ -1227,13 +1869,7 @@ while True:
 
 				while done == False:
 
-
-					#print(SPRITE_SIZE_SLIDER.get())
-
-					#SCROLL_UP = False
-					#SCROLL_DOWN = False
-
-					PRESSED_RELIEF = SUNKEN
+					
 
 
 
@@ -1248,25 +1884,26 @@ while True:
 
 					# =======================================    Button Display    ========================================
 
-
+					
 					for i in range(8):
-
-						if racers_to_follow["racer" + str(i)]: FOLLOW_BUTTONS[i].config(bg="#c8c8c8")
-						else: FOLLOW_BUTTONS[i].config(bg="#f0f0f0")
-
-
-					if show_checkpoints: CP_BUTTON.config(relief=PRESSED_RELIEF)
-					else:  CP_BUTTON.config(relief=RAISED)
-
-					if show_directions: FLOW_BUTTON.config(relief=PRESSED_RELIEF)
-					else:  FLOW_BUTTON.config(relief=RAISED)
+						if BV.racers_to_follow["racer" + str(i)]:
+							if not is_active_racer(i):
+								BV.toggle_follow(i)
 
 
-					if RECORD_MODE: REPLAY_BUTTON.config(relief=PRESSED_RELIEF)
-					else:  REPLAY_BUTTON.config(relief=RAISED)
+					if BV.TRAILS_TOGGLED:
+						for i in range(8): OBJECTS[i].show_trails = BV.TRAIL_LINES  # maybe change later?
 
-					if TRAIL_LINES: TRAIL_BUTTON.config(relief=PRESSED_RELIEF)
-					else:  TRAIL_BUTTON.config(relief=RAISED)
+						BV.TRAILS_TOGGLED = False
+
+					
+
+					
+
+
+					
+
+					
 
 
 
@@ -1305,14 +1942,17 @@ while True:
 					if ANIM_TIMER > (ANIM_TIMER_SWAP * 4) - 1:
 						ANIM_TIMER = 0
 
-					SPRITE_SCALE = int(SPRITE_SCALE_VAR.get())
+					SPRITE_SCALE = BV.get_sprite_scale()
 
 					
+
+					#T = time.perf_counter()
 
 					for event in pygame.event.get():
 						if event.type == QUIT: 
 							done = True
-							root.destroy()
+							BV.root.destroy()
+							BV.root = None
 
 						elif event.type == pygame.MOUSEBUTTONDOWN:
 
@@ -1391,120 +2031,86 @@ while True:
 
 
 
+					#T_0 = time.perf_counter() - T
 
+					#print(100 * T_0 * 60)
 
 					
 					# ======================================================================================================
 
-					#if KEYS_NEW["g"] == True: SHOW_GHOST = not SHOW_GHOST
+					
 
 
 
 
 
 					try:
-
 						
 						CH_BYTES.set_bytes([])
 						OBJ_BYTES.set_bytes([])
 						ITEM_BYTES.set_bytes([])
 
+						SOCKET_CONN.settimeout(1/120)
+						try:
+							data = RECV_DATA(block=False)
+						except socket.timeout:
+							data = "SOCKET_TIMEOUT"
+							BYTES_AS_LIST = []
+						SOCKET_CONN.settimeout(None)
 
-						data = RECV_DATA()
+
+						
 
 
 								
 						if not data:
-							#conn.send(b"close\n")
-							#conn.close()
 							CLOSE_CONN()
 							break
 
 
 						
 
-						if data == "close" or data == "close\n": # or data.decode("utf-8")[:5] == "close":
+						if data == "close" or data == "close\n":
 							break
 
 						elif data[:7] == 'CH_DATA':
-
-							#print(len(data))
 
 							data = data[7:]
 							
 
 							raw_bytes = data.split("\n")
 
-							#print(raw_bytes)
-
-
-
-							byte_list = [raw_bytes[0][i:i+2] for i in range(0, len(raw_bytes[0]), 2)]
 							
-							CH_BYTES.set_bytes(byte_list)
+							CH_BYTES.set_bytes(bytes.fromhex(raw_bytes[0]))
 
-							#conn.send(b"received data\n")
+							OBJ_BYTES.set_bytes(bytes.fromhex(raw_bytes[1]))
 
-							raw_bytes = raw_bytes[1:]
-							
-							byte_list = [raw_bytes[0][i:i+2] for i in range(0, len(raw_bytes[0]), 2)]
-							OBJ_BYTES.set_bytes(byte_list)
-
-							#conn.send(b"received data\n")
-							raw_bytes = raw_bytes[1:]
-							
-							#print(raw_bytes)
-							byte_list = [raw_bytes[0][i:i+2] for i in range(0, len(raw_bytes[0]), 2)]
-							ITEM_BYTES.set_bytes(byte_list)
-
-							raw_bytes = raw_bytes[1:]
-
-
+							ITEM_BYTES.set_bytes(bytes.fromhex(raw_bytes[2]))
 
 							# map update bytes
-							MAP_UPDATE_BYTES = [raw_bytes[0][i:i+2] for i in range(0, len(raw_bytes[0]), 2)]
+							MAP_UPDATE_BYTES = bytes.fromhex(raw_bytes[3])
 							
-							raw_bytes = raw_bytes[1:]
+							raw_bytes = raw_bytes[4:]
 
-							#conn.send(b"received data\n")
-
+						elif data == "SOCKET_TIMEOUT":
+							#print("[INFO] TIMEOUT")
+							do_frame_update()
 						else:
-							#print(data[:9])
-							#conn.send(b"received data\n")
 							pass
 
 
 
 
 
-						if in_file_dialogue:
+						if BV.in_file_dialogue:
 
+							send_yield_signal()
 
-							#conn.send(b"PAUSE\n")
+							file_path = tk.filedialog.askopenfilename(filetypes=[("SRAM files", ".srm .sram")])
 
-							send_pause_signal()
-							
-							#print("Paused")\
-							#nonce = RECV_DATA()
-
-							def update_while_open():
-								global _unpaused
-								_unpaused = False
-								while not _unpaused:
-									send_raw_signal("nonce")
-									sync_frame()
-								#print("EXITING THREAD")
-							
-							threading.Thread(target=update_while_open).start()
-							sync_frame()
-
-							file_path = tk.filedialog.askopenfilename()
-
-							#conn.send(b"UNPAUSE\n")
-							#nonce = RECV_DATA()
 							_unpaused = True
-							sync_frame()
-							send_unpause_signal()
+
+							send_unyield_signal()
 							
 
 							if file_path != "": 
@@ -1517,56 +2123,79 @@ while True:
 								for d in SRM_DATA:
 									srm_send += " " + str(d)
 
-								#conn.send(("W_SRAM" + srm_send + "\n").encode("utf-8"))
 								send_w_sram_signal(srm_send)
 
-								print("Wrote data from ", file_path)
+								print("[INFO] Uploaded data from ", file_path)
 
 
-							in_file_dialogue = False
+							BV.set_not_in_file_dialogue()
 
-							do_frame_update(root, CANVAS)
+							do_frame_update()
 							
 
 							continue
 
-								
+							
+						
 
+						
 
 
 						BYTES_AS_LIST = CH_BYTES.get_bytes()
 
 						if BYTES_AS_LIST != []:
-
-							ch_bytes = byte_buffer([x for x in BYTES_AS_LIST])
-							obj_bytes = byte_buffer([x for x in OBJ_BYTES.get_bytes()])
-							item_bytes = byte_buffer([x for x in ITEM_BYTES.get_bytes()])
-
-							gamemode = next_byte(ch_bytes)
-
-							ghost_mode_byte = next_byte(ch_bytes)
+							
+							
+							ch_bytes = byte_buffer(BYTES_AS_LIST)
+							obj_bytes = byte_buffer(OBJ_BYTES.get_bytes())
+							item_bytes = byte_buffer(ITEM_BYTES.get_bytes())
 
 							
 
+
+							gamemode = next_byte(ch_bytes)
+
+							C_MODE = next_byte(ch_bytes)
+
+							p_ghost_mode_byte = ghost_mode_byte
+							ghost_mode_byte = next_byte(ch_bytes)
+
+							ghost_mode_2 = next_byte(ch_bytes)
+
+							p_demo_byte = demo_byte
 							demo_byte = next_byte(ch_bytes)
 
-							SPRITE_SIZE_WIDGET.config(state='normal')
 
 							if ghost_mode_byte == 0x02 and demo_byte == 0:
-								REPLAY_BUTTON.config(state="normal")
+								if not (p_ghost_mode_byte == 0x02 and p_demo_byte == 0):
+									BV.REPLAY_BUTTON.config(state="normal")
 
-								if RECORD_MODE:
-									SHOW_GHOST = True
-									TRAIL_LINES = True
-									SPRITE_SCALE = 2
-									SPRITE_SCALE_VAR.set("2")
-									SPRITE_SIZE_WIDGET.config(state='disabled')
+									if BV.REPLAY_MODE:
+										BV.SHOW_GHOST = True
+										BV.TRAIL_LINES = True
+										SPRITE_SCALE = 2
+										BV.set_tkvar('SPRITE_SCALE', "2")
+										BV.SPRITE_SIZE_WIDGET.config(state='disabled')
 
-								SHOW_GHOST = True
+										if C_MODE == 2:
+											OBJECTS[0].show_trails = True
+										elif C_MODE == 4:
+											OBJECTS[1].show_trails = True
+
+									else:
+										pass
+
+									BV.SHOW_GHOST = True
 							else:
-								SHOW_GHOST = False
-								RECORD_MODE = False
-								REPLAY_BUTTON.config(state="disabled")
+								if (p_ghost_mode_byte == 0x02 and p_demo_byte == 0):
+									BV.SPRITE_SIZE_WIDGET.config(state='readonly')
+
+									BV.SHOW_GHOST = False
+									BV.REPLAY_MODE = False
+									BV.REPLAY_BUTTON.config(relief=RAISED)
+									BV.REPLAY_BUTTON.config(state="disabled")
+									
+							BV.SHOW_GHOST = ghost_mode_2
 
 								
 
@@ -1576,21 +2205,24 @@ while True:
 
 							# do not try to update stuff if not in a right gamemode
 							if not (gamemode == 0x02 or gamemode == 0x0e):
-								for i in range(8):
+								if prev_gamemode == 0x02 or prev_gamemode == 0x0e:
+									for i in range(8):
 
-									racers_to_follow["racer" + str(i)] = False
+										#BV.racers_to_follow["racer" + str(i)] = False
+										#BV.P_FOLLOW[i] = -1
 
-									
-									FOLLOW_BUTTONS[i].config(image=Assets.EMPTY_TK)
-									FOLLOW_BUTTONS[i].config(state="disabled")
+										BV.FOLLOW_BUTTONS[i].config(bg="#f0f0f0")
+										BV.FOLLOW_BUTTONS[i].config(image=Assets.EMPTY_TK)
+										BV.FOLLOW_BUTTONS[i].config(state="disabled")
+										
 
-								REPLAY_BUTTON.config(state="disabled")
-								RECORD_MODE = False
+									BV.REPLAY_BUTTON.config(state="disabled")
+									BV.REPLAY_MODE = False
+									BV.SHOW_GHOST = False
 
-								CANVAS.blit(BG, (0, 0))
-
-
-								do_frame_update(root, CANVAS)
+								
+								do_frame_update()
+								
 
 
 								for m_button in CURR_FRAME_MOUSE:
@@ -1605,91 +2237,73 @@ while True:
 
 								continue
 
+
+							# In correct gamemode to display
+
 							gametype = next_byte(ch_bytes)
 
 
 
 							###### Control what map should be displayed 
 							display_overlay = True
-							if not (gamemode == 0x02 or gamemode == 0x0e):
-								if prev_gamemode == 0x02 or prev_gamemode == 0x0e:
-									raise ZeroDivisionError()
-								display_overlay = False
+							
+
+
+							current_track_number = next_byte(ch_bytes)
+
+							current_theme_number = next_byte(ch_bytes)
+							current_theme_object = next_byte(ch_bytes)
+
+
+
+							if current_track_number != prev_track_number:
+
+								send_reset_map_signal()
+
+								
+								RECV_DATA() # nonce
+
+								send_yield_signal()
+
+								map_loading = True
+
+								setup_map_socket()
+
 
 								for i in range(8):
 									OBJECTS[i].reset_trail()
 
-									racers_to_follow["racer" + str(i)] = False
-
+									#BV.racers_to_follow["racer" + str(i)] = False
+									BV.P_FOLLOW[i] = -1
+									#print("CLEARING BV.P_FOLLOW[" + str(i) + "] from track change")
 									
-									FOLLOW_BUTTONS[i].config(image=Assets.EMPTY_TK)
-									FOLLOW_BUTTONS[i].config(state="disabled")
+									BV.FOLLOW_BUTTONS[i].config(bg="#f0f0f0")
+									BV.FOLLOW_BUTTONS[i].config(image=Assets.EMPTY_TK)
+									BV.FOLLOW_BUTTONS[i].config(state="disabled")
 
-
+									map_changed = True
 
 							else:
-								current_track_number = next_byte(ch_bytes)
 
-								current_theme_number = next_byte(ch_bytes)
-								current_theme_object = next_byte(ch_bytes)
+								
+								
 
-								#print(current_theme_object)
+								byte_list = MAP_UPDATE_BYTES
 
+								map_updates = []
 
+								while len(byte_list) >= 3:
 
-								if current_track_number != prev_track_number:
+									offs = byte_list[0] + (byte_list[1] * 256)
+									val = byte_list[2]
 
-									send_reset_map_signal()
+									map_updates.append((offs, val))
 
-									
-									RECV_DATA() # nonce
+									byte_list = byte_list[3:]
 
-									setup_map_socket()
-
-
-									for i in range(8):
-										OBJECTS[i].reset_trail()
-
-										racers_to_follow["racer" + str(i)] = False
-
-										
-										FOLLOW_BUTTONS[i].config(image=Assets.EMPTY_TK)
-										FOLLOW_BUTTONS[i].config(state="disabled")
-
-								else:
-
-									#conn.send(b"UPDATE_MAP\n")
-
-									#print("UPDATE_MAP")
-
-									#raw_bytes = RECV_DATA().split("\n")
-
-
-									#raw_bytes = data.decode('ascii').split("\n")
-									#byte_list = [int("0x" + raw_bytes[0][i:i+2], 16) for i in range(0, len(raw_bytes[0]), 2)]
-
-									
-									# if MAP_UPDATE_BYTES != []: print(MAP_UPDATE_BYTES)
-									
-
-									byte_list = [int("0x" + x, 16) for x in MAP_UPDATE_BYTES]
-
-									map_updates = []
-
-									while len(byte_list) >= 3:
-
-										offs = byte_list[0] + (byte_list[1] * 256)
-										val = byte_list[2]
-
-										map_updates.append((offs, val))
-
-										byte_list = byte_list[3:]
-
-									update_map_data(map_updates)
+								update_map_data(map_updates)
 									
 									
-
-
 
 
 
@@ -1697,97 +2311,150 @@ while True:
 
 
 							
+							
 
 
 
 
-
+							
 							
 							if map_ready:
 
-								###### DISPLAY MAP ######
-								if show_checkpoints:
-									if show_directions:
-										screen.blit(full_map_SMALL, (0, 0))
-									else:
-										screen.blit(map_cp_SMALL, (0, 0))
-								else:				
-									if show_directions:
-										screen.blit(map_flow_SMALL, (0, 0))
-									else:
-										screen.blit(map_screen_SMALL, (0, 0))
+								FRAMES += 1
+
+								
+							
 
 
+								###########################################################
 
+								if map_changed:
+									update_tilemap()
+									update_zone_flow()
+									map_changed = False
+
+								if map_loading:
+									map_loading = False
+									send_unyield_signal()
+
+
+								# render map
+								renderTexture(TILEMAP_TEX, pos=(screen.x+screen.w/2, screen.y+screen.h/2), dim=(screen.w, screen.h), centered=True)
+
+
+								if BV.show_zones: renderTexture(ZONEMAP_TEX, pos=(screen.x+screen.w/2, screen.y+screen.h/2), dim=(screen.w, screen.h), centered=True)
+
+								if BV.show_flows: renderTexture(FLOWMAP_TEX, pos=(screen.x+screen.w/2, screen.y+screen.h/2), dim=(screen.w, screen.h), centered=True)
+								
+								
+								###########################################################
+
+
+								
+
+						
 
 								camera_angle = map_value(next_byte(ch_bytes), "degrees") + 90
 
+								camx = next_word(ch_bytes) + 0x80
+								camy = next_word(ch_bytes) + 0x66
+
+								CAM_POS = (camx, camy)
+
+								
 								
 								## DISPLAY OVERLAY DATA OVER TRACK
 								if display_overlay:
 
+									
+
 									# Racer object data setting
 									for i in range(8):
-										OBJECTS[i].surface = CANVAS
-
-										
-										
-											
 
 
 										########### PARSE RECIEVED DATA PER CHARACTER ##############
 
 										OBJECTS[i].ch_num = next_byte(ch_bytes)
 
-										X_coord = map_value(next_word(ch_bytes), "width")
-										Y_coord = map_value(next_word(ch_bytes), "height")
+										X_coord = map_value(next_double(ch_bytes), "width")
+										Y_coord = map_value(next_double(ch_bytes), "height")
 
-										if (gametype == 0) or (gametype == 2 and i < 2) or (gametype == 4 and (i == 0 or   (i == 1 and (not RECORD_MODE) and SHOW_GHOST )))  or (gametype == 6 and i < 2):
-											
-											FOLLOW_BUTTONS[i].config(image=Assets.CHARACTERS_TK[OBJECTS[i].ch_num // 2])
-											FOLLOW_BUTTONS[i].config(state="normal")
+
+										if is_active_racer(i):
+
+											if OBJECTS[i].ch_num != BV.P_FOLLOW[i]:
+												pfi = BV.P_FOLLOW[i]
+												#print("SETTING UP FOLLOW BUTTON", i, "with character number", OBJECTS[i].ch_num, "BV.P_FOLLOW =", BV.P_FOLLOW[i], "BV.SHOW_GHOST =", BV.SHOW_GHOST)
+												BV.P_FOLLOW[i] = OBJECTS[i].ch_num
+												BV.FOLLOW_BUTTONS[i].config(image=Assets.CHARACTERS_TK[Objects.CHAR_NUM_TO_NAME(OBJECTS[i].ch_num)])
+												BV.FOLLOW_BUTTONS[i].config(state="normal")
+
+												if BV.racers_to_follow["racer" + str(i)] and pfi == -1:
+													BV.FOLLOW_BUTTONS[i].config(bg="#c8c8c8")
 											
 
 										else:
-											X_coord = -100
-											Y_coord = -100
-											OBJECTS[i].reset_trail()
+											X_coord = -1000
+											Y_coord = -1000
+											#OBJECTS[i].reset_trail()
+											OBJECTS[i].show_trails = False
 
-											racers_to_follow["racer" + str(i)] = False
+											BV.racers_to_follow["racer" + str(i)] = False
 
-											
-											FOLLOW_BUTTONS[i].config(image=Assets.EMPTY_TK)
-											FOLLOW_BUTTONS[i].config(state="disabled")
+											if BV.P_FOLLOW[i] != -1:
+												BV.P_FOLLOW[i] = -1
+												#print("DISABLING FOLLOW BUTTON", i)
+												BV.FOLLOW_BUTTONS[i].config(bg="#f0f0f0")
+												BV.FOLLOW_BUTTONS[i].config(image=Assets.EMPTY_TK)
+												BV.FOLLOW_BUTTONS[i].config(state="disabled")
 
 
 										
 
 										OBJECTS[i].x = X_coord
 										OBJECTS[i].y = Y_coord
-										OBJECTS[i].z = next_word(ch_bytes)
-
-										OBJECTS[i].angle = map_value(next_byte(ch_bytes), "degrees")
+										OBJECTS[i].z = next_double(ch_bytes)*256 # TO-DO MAYBE REMOVE THIS 256?
 
 										OBJECTS[i].vel = (map_value(next_word_signed(ch_bytes)/4, "width"), 
+											              map_value(next_word_signed(ch_bytes)/4, "height"),
 											              map_value(next_word_signed(ch_bytes)/4, "height"))
+
+										OBJECTS[i].speed = map_value(next_word_signed(ch_bytes)/4, "width")
+
+										OBJECTS[i].max_speed = map_value(next_word_signed(ch_bytes)/4, "width")
+
+										OBJECTS[i].accel = map_value(next_word_signed(ch_bytes)/4, "width")
+
+
+										OBJECTS[i].angle = map_value(next_word(ch_bytes)/256, "degrees")
+
+										OBJECTS[i].v_angle = map_value(next_word(ch_bytes)/256, "degrees")
+
+										OBJECTS[i].c_angle = map_value(next_word(ch_bytes)/256, "degrees")
+
+										OBJECTS[i].angle_vel = map_value(next_word(ch_bytes)/256, "degrees")
 
 										OBJECTS[i].dest = (map_value(next_word(ch_bytes), "width"),
 											               map_value(next_word(ch_bytes), "height"))
 
+										
 
+									#print("Racer Data Time:", 100 * (time.perf_counter() - T) * 60)
 
+									#T = time.perf_counter()
 
 									#Obstacle object data
 									for i in range(8):
 
-										OBJECTS[num_racers + i].surface = CANVAS
-
 										#obj_addr = next_word(obj_bytes)
 										OBJECTS[num_racers + i].address = next_word(obj_bytes)
 
-										OBJECTS[num_racers + i].x = map_value(next_word(obj_bytes), "width")
-										OBJECTS[num_racers + i].y = map_value(next_word(obj_bytes), "height")
-										OBJECTS[num_racers + i].z = next_word(obj_bytes)
+										OBJECTS[num_racers + i].x = map_value(next_double(obj_bytes), "width")
+										OBJECTS[num_racers + i].y = map_value(next_double(obj_bytes), "height")
+										OBJECTS[num_racers + i].z = next_byte(obj_bytes)/256 + next_word(obj_bytes) # TO-DO MAYBE REMOVE THIS 256?
+										next_byte(obj_bytes) # waste because there's a bug with MONTY?????????
+
+										#if OBJECTS[num_racers + i].z > 0x1000: print(hex(int(OBJECTS[num_racers + i].z * 256)))
 
 
 										if gametype != 6:
@@ -1802,15 +2469,15 @@ while True:
 
 											#print("Object", i, ": ", format(obj_addr, "04x"))
 
+									#print("Obstacle Data Time:", 100 * (time.perf_counter() - T) * 60)
 
+									#T = time.perf_counter()
 
 									
 									# Item object data
 									for i in range(8):
 
 										if (gametype == 0 and i < 2) or (gametype == 2) or (gametype == 6 and i < 6):
-											OBJECTS[num_racers + num_obstacles + i].surface = CANVAS
-
 
 											########### PARSE RECIEVED DATA PER ITEM ##############
 
@@ -1825,23 +2492,23 @@ while True:
 
 											ch_num_1 = next_byte(item_bytes)
 											ch_num_2 = next_byte(item_bytes)
-											#print(format(ch_num_1, "02x"), format(ch_num_2, "02x"))
+											
 											OBJECTS[num_racers + num_obstacles + i].ch_num = (ch_num_2 * 8) + ch_num_1
 
-											#if MOUSE_NEW["left"]:
-											#	print(format(OBJECTS[num_racers + num_obstacles + i].ch_num, "02x"))
+											
 
 											
-											OBJECTS[num_racers + num_obstacles + i].x = map_value(next_word(item_bytes), "width")
-											OBJECTS[num_racers + num_obstacles + i].y = map_value(next_word(item_bytes), "height")
-											OBJECTS[num_racers + num_obstacles + i].z = next_word(item_bytes)
-									
-										
+											OBJECTS[num_racers + num_obstacles + i].x = map_value(next_double(item_bytes), "width")
+											OBJECTS[num_racers + num_obstacles + i].y = map_value(next_double(item_bytes), "height")
+											OBJECTS[num_racers + num_obstacles + i].z = next_double(item_bytes)*256 # TO-DO MAYBE REMOVE THIS 256?
 									
 									
 
-
+									#print("Item Data Time:", 100 * (time.perf_counter() - T) * 60)
 									#UPDATING
+									#T1 = time.perf_counter() - T0
+
+									#print("TOTAL OBJECT TIME:", 100 * T1 * 60)
 
 
 									#==============================================================================================================
@@ -1850,32 +2517,35 @@ while True:
 									#
 									#==============================================================================================================
 
-
+									
+									
 
 
 									if True:
 										m_x, m_y = pygame.mouse.get_pos()
 										mouse = (m_x, m_y)
-										m_x = screen.INV_SCALE*(-screen.x + m_x) * 1024/screen.DEFAULT_WIDTH
-										m_y = screen.INV_SCALE*(-screen.y + m_y) * 1024/screen.DEFAULT_HEIGHT
+										m_x = disp2map_X(m_x)
+										m_y = disp2map_Y(m_y)
 										
 
 										mouse_rel = pygame.mouse.get_rel()
 
+										
 
 
 
 
 
 
-									if MOUSE_NEW["left"]:
+
+									if MOUSE_NEW["right"]:
 										
 										for i in range(len(OBJECTS)):
 
 											OBJ = OBJECTS[i]
 
-											O_x = OBJ.x * 1024/screen.DEFAULT_WIDTH
-											O_y = OBJ.y * 1024/screen.DEFAULT_HEIGHT
+											O_x = OBJ.x
+											O_y = OBJ.y
 
 											
 
@@ -1889,18 +2559,18 @@ while True:
 
 
 								
-									if CURR_FRAME_MOUSE["left"]:
+									if CURR_FRAME_MOUSE["right"]:
 										
 										if grabbed != -1:
 											
 
-											X_COORD = int((m_x + m_off[0])/2)
-											Y_COORD = int((m_y + m_off[1] + 4)/2)
+											X_COORD = int((m_x + m_off[0]))
+											Y_COORD = int((m_y + m_off[1] + 4))
 
 										
 
-											OBJECTS[grabbed].x = (X_COORD * screen.DEFAULT_WIDTH/1024) * 2
-											OBJECTS[grabbed].y = (Y_COORD * screen.DEFAULT_HEIGHT/1024) * 2
+											OBJECTS[grabbed].x = X_COORD
+											OBJECTS[grabbed].y = Y_COORD
 
 											ADDR = OBJECTS[grabbed].address
 
@@ -1911,7 +2581,7 @@ while True:
 												
 												
 												part1 = "W_BYTES addr" + " " + str(ADDR + 0x18) + " " + "bytes" + " " + str(X_COORD & 0xff) + " " + str((X_COORD>>8 & 0xff)) + " 00 00 " + str(Y_COORD & 0xff) + " " + str((Y_COORD>>8 & 0xff)) + " 00 00 05 " + "\n"
-												#conn.send(part1.encode("utf-8"))
+												
 												send_raw_signal(part1)
 
 											F += 1
@@ -1920,7 +2590,7 @@ while True:
 										if grabbed != -1:
 											ADDR = OBJECTS[grabbed].address
 											ground_instr = "W_BYTES addr" + " " + str(ADDR + 0x1e) + " " + "bytes" + " " + "00 00 00 00" + "\n"
-											#conn.send(ground_instr.encode("utf-8"))
+
 											send_raw_signal(ground_instr)
 
 										grabbed = -1
@@ -1950,52 +2620,58 @@ while True:
 									
 
 
-									if RECORD_MODE and gametype == 4 and demo_byte == 0:
+									if BV.REPLAY_MODE and gametype == 4 and demo_byte == 0:
 
 										
 										send_ghost_signal()
-										racers_to_follow["racer0"] = True
+
+										if C_MODE == 2:
+											# top screen
+											p_f = BV.racers_to_follow["racer0"]
+											BV.racers_to_follow["racer0"] = True
+											if p_f == False: BV.FOLLOW_BUTTONS[0].config(bg="#c8c8c8")
+
+										elif C_MODE == 4:
+											# bottom screen
+											p_f = BV.racers_to_follow["racer1"]
+											BV.racers_to_follow["racer1"] = True
+											if p_f == False: BV.FOLLOW_BUTTONS[1].config(bg="#c8c8c8")
+
+									else:
+										if BV.GHOST_TURN_OFF:
+											send_ghost_off_signal()
+											BV.GHOST_TURN_OFF = False
 
 
 
 									FOLLOWING = []
 
-									for racer in racers_to_follow:
-										if racers_to_follow[racer] == True:
+									for racer in BV.racers_to_follow:
+										if BV.racers_to_follow[racer] == True:
 											FOLLOWING.append(int(racer[-1])) # cheap but dirty way to add the racer number in
 									
 
 
 
 
+									
 
 
-									'''
-									if SCROLL_UP:
-										screen.zoom(mouse, 1.1)
-
-									elif SCROLL_DOWN:
-										screen.zoom(mouse, 0.9)
-									'''
+									
 
 																
 									if CURR_FRAME_MOUSE["scroll_up"]:
-										screen.zoom(mouse, 1.1)
+										screen.zoom(mouse, screen.SCALE * 1.1)
 									elif CURR_FRAME_MOUSE["scroll_down"]:
-										screen.zoom(mouse, 0.9)
+										screen.zoom(mouse, screen.SCALE * 0.9)
 									
 
-									'''
-									if CURR_FRAME_KEYS["i"]:
-										screen.zoom(mouse, 1.1)
-									elif CURR_FRAME_KEYS["o"]:
-										screen.zoom(mouse, 0.9)
-									'''
+									
 								
 
 
 									
-									if CURR_FRAME_MOUSE["right"]:
+									if CURR_FRAME_MOUSE["left"]:
 										screen.x = screen.x + mouse_rel[0]
 										screen.y = screen.y + mouse_rel[1]
 
@@ -2033,8 +2709,8 @@ while True:
 											CENTER_Y = math.floor((top_y + bottom_y)/2)
 
 
-										screen.center_x = CENTER_X
-										screen.center_y = CENTER_Y
+										screen.center_x = CENTER_X * screen.DEFAULT_WIDTH/MAP_W
+										screen.center_y = CENTER_Y * screen.DEFAULT_HEIGHT/MAP_H
 
 
 
@@ -2050,31 +2726,60 @@ while True:
 
 
 									#DISPLAY
-									if TRAIL_LINES == False:
+
+
+									if BV.TRAIL_LINES == False:
 										NUM_TRAILS = 0
 									elif gametype == 4:
-										NUM_TRAILS = 2000
+										NUM_TRAILS = MAX_TRAILS_CONFIG
 									else:
-										NUM_TRAILS = 100
+										NUM_TRAILS = MAX_TRAILS_CONFIG/16
 
 
 									if FRAME_NUMBER > FRAME_SKIP:
+
+										#T0 = time.perf_counter()
+
+										#print(screen.SCALE, screen.w, screen.DEFAULT_WIDTH)
 										
 										FRAME_NUMBER = 0
 
-										CANVAS.blit(BG, (0, 0))
-										#CANVAS.blit(screen.canvas, (screen.x, screen.y))
-										CANVAS.blit(screen.canvas, (0, 0))
+										#CANVAS.blit(BG, (0, 0))
+										
+										####CANVAS.blit(screen.canvas, (0, 0))   #--- come back to this later!
+
+										#T0 = time.perf_counter()
+										# trails
+										#l_width = screen.w / MAP_W
+
+										if BV.TRAIL_LINES:
+											SHOW_TRAIL_LINES()
+
+											#T1 = time.perf_counter() - T0
+
+											#print("Line Time:", 100 * T1 * 60)
+										
+
+
+										#glFinish()
+										#glFlush()
+
+										#glColor3f(1.0, 1.0, 1.0)
+
+										#T0 = time.perf_counter()
+
+										TRAIL_AMT = NUM_TRAILS
+										if BV.REPLAY_MODE: TRAIL_AMT = TRAIL_AMT // 2
 
 										# racers
 										for i in range(7, -1, -1):
 											OBJ = OBJECTS[i]
 											if (gametype == 0) or (gametype == 2 and i < 2) or (gametype == 4 and i < 2) or (gametype == 6 and i < 2):
 												#print(i)
-												OBJ.scl = math.floor(screen.SCALE * width//128 * SQRT_2 * SPRITE_SCALE)
-												OBJ.disp_x = OBJ.x*screen.SCALE + screen.x
-												OBJ.disp_y = OBJ.y*screen.SCALE + screen.y
-												if RECORD_MODE and i == 1 and gametype == 4:
+												OBJ.scl = math.floor(screen.SCALE * screen.DEFAULT_WIDTH/MAP_W * width//128 * SQRT_2 * SPRITE_SCALE / 1)
+												OBJ.disp_x = map2disp_X(OBJ.x)
+												OBJ.disp_y = map2disp_Y(OBJ.y)
+												if BV.REPLAY_MODE and i == 1 and gametype == 4:
 													#OBJ.display(screen, trails=False)
 													pass
 												else:
@@ -2082,22 +2787,30 @@ while True:
 														GHOST_FLASH_TIMER += 1
 														if GHOST_FLASH_TIMER == 2:
 															GHOST_FLASH_TIMER = 0
+
+														t = TRAIL_AMT
+														if BV.REPLAY_MODE: t = 0
+
 														if GHOST_FLASH_TIMER % 2 == 0:
-															OBJ.display(screen, trails=NUM_TRAILS)
+															OBJ.display(d_method=renderObject)
+															OBJ.update_trails(trails=t, log_freq=TRAIL_FREQ_CONFIG)
+															#pass
 														else:
-															OBJ.display(screen, trails=NUM_TRAILS, ghost=True)
+															OBJ.display(ghost=True, d_method=renderObject)
+															OBJ.update_trails(trails=t, log_freq=TRAIL_FREQ_CONFIG)
 														
 													else:
-														OBJ.display(screen, trails=NUM_TRAILS)
+														OBJ.display(d_method=renderObject)
+														OBJ.update_trails(trails=TRAIL_AMT, log_freq=TRAIL_FREQ_CONFIG)
 
 										# obstacles
 										for i in range(7, -1, -1):
 											j = num_racers + i
 											OBJ = OBJECTS[j]
-											OBJ.scl = math.floor(screen.SCALE * width//128 * SPRITE_SCALE)
-											OBJ.disp_x = OBJ.x*screen.SCALE + screen.x
-											OBJ.disp_y = OBJ.y*screen.SCALE + screen.y
-											OBJ.display()
+											OBJ.scl = max(0, math.floor(screen.SCALE * screen.DEFAULT_WIDTH/MAP_W * width//128 * SPRITE_SCALE / 1))
+											OBJ.disp_x = map2disp_X(OBJ.x)
+											OBJ.disp_y = map2disp_Y(OBJ.y)
+											OBJ.display(d_method=renderObject)
 
 										#items
 										for i in range(7, -1, -1):
@@ -2105,10 +2818,35 @@ while True:
 											OBJ = OBJECTS[j]
 											if (gametype == 0 and i < 2) or (gametype == 2) or (gametype == 6 and i < 6):
 												if OBJ.is_alive:
-													OBJ.scl = math.floor(screen.SCALE * width//256 * SPRITE_SCALE)
-													OBJ.disp_x = OBJ.x*screen.SCALE + screen.x
-													OBJ.disp_y = OBJ.y*screen.SCALE + screen.y
-													OBJ.display()
+													OBJ.scl = math.floor(screen.SCALE * screen.DEFAULT_WIDTH/MAP_W * width//256 * SPRITE_SCALE / 1)
+													OBJ.disp_x = map2disp_X(OBJ.x)
+													OBJ.disp_y = map2disp_Y(OBJ.y)
+													OBJ.display(d_method=renderObject)
+
+
+
+
+
+
+										if BV.REPLAY_MODE:
+											if not BV.P_REPLAY_MODE:
+												if C_MODE == 2:
+													OBJECTS[0].show_trails = True
+													OBJECTS[0].copy_trail(OBJECTS[1])
+												elif C_MODE == 4:
+													OBJECTS[1].show_trails = True
+													OBJECTS[1].copy_trail(OBJECTS[0])
+										else:
+											if BV.P_REPLAY_MODE:
+												if C_MODE == 2:
+													OBJECTS[1].copy_trail(OBJECTS[0])
+												elif C_MODE == 4:
+													OBJECTS[0].copy_trail(OBJECTS[1])
+
+										BV.P_REPLAY_MODE = BV.REPLAY_MODE
+										
+
+
 
 
 
@@ -2117,7 +2855,7 @@ while True:
 										if SHOW_DEBUG:
 
 											DEBUG_LIST = [
-												"RECORD_MODE: " + str(RECORD_MODE),
+												"BV.REPLAY_MODE: " + str(BV.REPLAY_MODE),
 												"NUM_TRAILS: " + str(NUM_TRAILS),
 												"SPRITE_SCALE: " + str(SPRITE_SCALE),
 												"FOLLOWING: " + str([x + 1 for x in FOLLOWING])
@@ -2133,26 +2871,20 @@ while True:
 
 
 
-								
+									#glPopMatrix()
 								
 
 
 
 							else:
+								#print("[INFO] MAP NOT YET READY")
 								pass
 							
 							
 
 
-
-
-							#threading.Thread(target=pygame.display.flip).start()
-							do_frame_update(root, CANVAS)
-							'''
-							send_frame_signal()
-							pygame.display.update(CANVAS.get_rect()) #pygame.display.flip()
-							root.update()
-							'''
+							do_frame_update()
+							
 							
 
 							
@@ -2175,16 +2907,11 @@ while True:
 							prev_track_number = current_track_number
 					except ZeroDivisionError:
 
-						do_frame_update(root, CANVAS)
-						'''
-						send_frame_signal()
-						pygame.display.update(CANVAS.get_rect()) #pygame.display.flip()
-						root.update()
-						'''
-
-
-						#clock.tick(fps)
+						do_frame_update()
+						
 					except Exception as e:
+						#traceback.print_exc()
+						#print(e)
 
 						#print(BYTES_AS_LIST)
 						#conn.send(b"close\n")
@@ -2193,45 +2920,45 @@ while True:
 						raise
 						
 
-					#P_LEFT_PRESSED = LEFT_PRESSED
-					#P_RIGHT_PRESSED = RIGHT_PRESSED
+					
 
 			except TclError as e:
+				#traceback.print_exc()
 				#print(e)
 				pass
 			except Exception as e:
+				traceback.print_exc()
 				print(e)
 
 				
 
 			pygame.quit()
 
-			if root != None:
+			if BV.root != None:
 				try:
-					root.destroy()
-					root = None
+					BV.root.destroy()
+					BV.root = None
 				except Exception:
 					pass
 
-			print(addr[0], "disconnected.", end="")
+			print("[INFO] Disconnected from", CONN_NAME, end="")
 			printed_reason = False
 
-			if data == "close" or data == "close\n": # or data.decode("utf-8")[:5] == "close":
+			if data == "close" or data == "close\n":
 				if len(data) > 6:
-					print("  Reason: ", data[6:])
+					print("\n       Reason: ", data[6:])
 					printed_reason = True
 
-			if not printed_reason:
-				print("  Reason: Server Script Forcibly Stopped")
 
-			try:
-				#conn.send(b"close\n")
-				#conn.close()
-				CLOSE_CONN()
-			except ConnectionResetError:
-				pass
-			except OSError:
-				pass
+			if not printed_reason: print("\n       Reason: Server Script Forcibly Stopped")
+
+
+
+			try: CLOSE_CONN()
+			except ConnectionResetError: pass
+			except OSError: pass
+
+	break
 
 
 	

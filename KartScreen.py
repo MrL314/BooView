@@ -15,9 +15,9 @@ class Screen(pygame.Surface):
 		self._h = size[1]
 		self._DEFAULT_WIDTH = size[0]
 		self._DEFAULT_HEIGHT = size[1]
-		self._canvas = pygame.Surface(size)
+		self._canvas = pygame.Surface(size, SRCALPHA)
 		self._canvas.fill((0, 0, 0))
-		self._screen = pygame.Surface(size)
+		self._screen = pygame.Surface(size, SRCALPHA)
 
 	@property
 	def x(self):
@@ -25,6 +25,7 @@ class Screen(pygame.Surface):
 	@x.setter
 	def x(self, _x):
 		self._x = _x
+		self.check_bound()
 	
 	@property
 	def y(self):
@@ -32,6 +33,7 @@ class Screen(pygame.Surface):
 	@y.setter
 	def y(self, _y):
 		self._y = _y
+		self.check_bound()
 
 	@property
 	def w(self):
@@ -63,31 +65,22 @@ class Screen(pygame.Surface):
 
 	@property
 	def SCALE(self):
-		return (self.w / self.DEFAULT_WIDTH) / 2
+		#return (self.w / self.DEFAULT_WIDTH) / 2
+		return (self.w / self.DEFAULT_WIDTH)
 
 	@property
 	def INV_SCALE(self):
-		return (self.DEFAULT_WIDTH / self.w) * 2
+		#return (self.DEFAULT_WIDTH / self.w) * 2
+		return (self.DEFAULT_WIDTH / self.w)
 	
 
 
 
 	@property
 	def canvas(self):
-		if self.w < self.DEFAULT_WIDTH:
-			self.w = self.DEFAULT_WIDTH
-			self.h = self.DEFAULT_HEIGHT
-
-		if self.x > self.DEFAULT_X:
-			self.x = self.DEFAULT_X
-		if self.y > self.DEFAULT_Y:
-			self.y = self.DEFAULT_Y
-		if self.x + self.w < self.DEFAULT_X + self.DEFAULT_WIDTH:
-			self.x = self.DEFAULT_X + self.DEFAULT_WIDTH - self.w
-		if self.y + self.h < self.DEFAULT_Y + self.DEFAULT_HEIGHT:
-			self.y = self.DEFAULT_Y + self.DEFAULT_HEIGHT - self.h
 		
-		cv = pygame.Surface(( ((self.DEFAULT_WIDTH*self.INV_SCALE/2)//1 + 1) * 1, ((self.DEFAULT_HEIGHT*self.INV_SCALE/2)//1 + 1) * 1))
+		
+		cv = pygame.Surface(( ((self.DEFAULT_WIDTH*self.INV_SCALE/2)//1 + 1) * 1, ((self.DEFAULT_HEIGHT*self.INV_SCALE/2)//1 + 1) * 1), SRCALPHA)
 
 		#cv.blit(self._screen, (self.x*self.INV_SCALE, self.y*self.INV_SCALE), area=cv.get_rect().move(self.x * self.INV_SCALE * -1, self.y * self.INV_SCALE * -1))
 		#cv.blit(self._screen, (0, 0), area=cv.get_rect().move(self.x * self.INV_SCALE * -1, self.y * self.INV_SCALE * -1))
@@ -109,6 +102,7 @@ class Screen(pygame.Surface):
 	def center_x(self, _x):
 		self.x = -(_x*self.SCALE) + (self.DEFAULT_WIDTH/2)
 
+
 	@property
 	def center_y(self):
 		return self.INV_SCALE*(-self.y + self.DEFAULT_HEIGHT/2)
@@ -116,19 +110,48 @@ class Screen(pygame.Surface):
 	def center_y(self, _y):
 		self.y = -(_y*self.SCALE) + (self.DEFAULT_HEIGHT/2)
 
+		
+
+
+	def check_bound(self):
+		if self._w < self._DEFAULT_WIDTH:
+			self._w = self._DEFAULT_WIDTH
+			self._h = self._DEFAULT_HEIGHT
+
+		if self._x > self._DEFAULT_X:
+			self._x = self._DEFAULT_X
+		if self._y > self._DEFAULT_Y:
+			self._y = self._DEFAULT_Y
+		if self._x + self._w < self._DEFAULT_X + self._DEFAULT_WIDTH:
+			self._x = self._DEFAULT_X + self._DEFAULT_WIDTH - self._w
+		if self._y + self._h < self._DEFAULT_Y + self._DEFAULT_HEIGHT:
+			self._y = self._DEFAULT_Y + self._DEFAULT_HEIGHT - self._h
+
 	
 
-	def zoom(self, pos, zoom_ratio):
+	def zoom(self, pos, zoom_amt):
 
-		if self.w * zoom_ratio > self.DEFAULT_WIDTH * 8:
-			zoom_ratio = (self.INV_SCALE/2) * 8
+		z_r = self.SCALE
 
-		self.w = self.w * zoom_ratio
-		self.h = self.h * zoom_ratio
+		#zoom_ratio = z_r + zoom_amt
+		zoom_ratio = zoom_amt
+
+
+
+		if zoom_ratio < 1: zoom_ratio = 1
+		if zoom_ratio > 8: zoom_ratio = 8
+
+		self.w = self.DEFAULT_WIDTH * zoom_ratio
+		self.h = self.DEFAULT_HEIGHT * zoom_ratio
 		x,y = pos
+		
 
-		self.x = zoom_ratio*(self.x - x) + x
-		self.y = zoom_ratio*(self.y - y) + y
+		self.x = x - (zoom_ratio/z_r)*(x - self.x)
+		self.y = y - (zoom_ratio/z_r)*(y - self.y)
+
+		
+
+
 
 
 	def blit(self, surface, position, area=None, special_flags=0):

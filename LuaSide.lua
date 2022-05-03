@@ -5,8 +5,8 @@
 
 
 
-
-
+LUA_VERSION_NUMBER = "2.0"
+PY_VERSION_NUMBER = "2.0"
 
 
 
@@ -23,7 +23,7 @@ local host, port = "localhost", 65432
 
 
 
-
+emu.yield()
 
 
 
@@ -98,10 +98,11 @@ event.onexit(onExit)
 
 socket_client = nil
 
-SOCKET_TIMEOUT = nil
+SOCKET_TIMEOUT = 0.01
+CURR_TIMEOUT = 0.01
 --RECV_BUFFER = {}
 
-
+CLIENT_NAME = ""
 --SYNCED = false
 
 function connect_client()
@@ -110,13 +111,9 @@ function connect_client()
 	--socket_client:settimeout(0.1, 't')
 	--socket_client:settimeout(1, 't')
 	socket_client:settimeout(SOCKET_TIMEOUT)
-	console.write("\nConnected to " .. socket_client:getpeername())
+
 end
 
-if pcall(connect_client) then
-else
-	socket_client = nil
-end
 
 
 function socket_client_is_open()
@@ -129,9 +126,11 @@ end
 
 function close_socket_client(msg)
 	if socket_client_is_open() then
-		console.write("\nDisconnected from " .. socket_client:getpeername() .. ".")
+		local ad = socket_client:getpeername()
+		if CLIENT_NAME ~= "" then ad = CLIENT_NAME end
+		console.write("\n[INFO] Disconnected from " .. ad .. ".")
 		if msg ~= "" then
-			console.write("\nReason: " .. msg .. "\n")
+			console.write("\n       Reason: " .. msg .. "\n")
 		end
 		socket_client:send("close\n" .. msg)
 		socket_client:close()
@@ -142,6 +141,8 @@ end
 
 function send_data(data)
 	if socket_client_is_open() then
+		--console.log(">>> " .. data .. "\n")
+
 		socket_client:send(data)
 	end
 end
@@ -156,7 +157,7 @@ function receive_from_server()
 				return "SOCKET_ERROR_TIMEOUT"
 			end
 			if err ~= "closed" then
-				console.write("Socket Error: " .. err)
+				console.write("[ERROR] Socket Error: " .. err .. "\n")
 			end
 			return err
 		end
@@ -165,6 +166,8 @@ function receive_from_server()
 			close_socket_client("Server sync failed")
 			return nil
 		end
+
+		--console.log("<<< " .. data .. "\n")
 
 		return data
 	end
@@ -202,8 +205,26 @@ end
 
 function sync_with_server()
 	if socket_client_is_open() then
-		socket_client:send("sync\n")
-		local data = receive_from_server()
+		--socket_client:settimeout(nil)
+		socket_client:settimeout(0.01)
+		send_data("sync\n")
+
+		local FAILURES = 0
+		local data = "SOCKET_ERROR_TIMEOUT"
+
+		while data == "SOCKET_ERROR_TIMEOUT" do
+			data = receive_from_server()
+			FAILURES = FAILURES + 1
+			if data == "SOCKET_ERROR_TIMEOUT" then
+				emu.frameadvance();
+				if FAILURES > 1000 then
+					break
+				end
+			end
+		end
+
+		--local data = receive_from_server()
+		socket_client:settimeout(SOCKET_TIMEOUT)
 
 		--if data == true then return true
 
@@ -216,13 +237,19 @@ function sync_with_server()
 			return true
 		end
 
-		if data == "closed" then
+		if data == "closed" or data == "close" then
 			close_socket_client("Server was forcibly closed.")
 			return false
 		end
 
+		if data == "SOCKET_ERROR_TIMEOUT" then
+			close_socket_client("Server sync failed.")
+			return false
+		end
+
+
 		-- test this to make sure it makes sense
-		console.write("\nSYNC RECEIVED: " .. data)
+		console.write("\n[WARNING] SYNC RECEIVED: " .. data .. "\n")
 		return true
 	end
 	return false
@@ -232,29 +259,71 @@ end
 
 
 
-
 function readMemoryBlock(domain, start, block_size)
-
 	local return_domain = memory.getcurrentmemorydomain()
 
-	local block = ""
+	local block = {}
 
 	memory.usememorydomain(domain)
 
+	local bts = memory.readbyterange(start, block_size)
+
 	for i=0,block_size-1 do
-		block = block .. string.format("%02x", memory.readbyte(start + i))
+		block[i+1] = string.format("%02x", bts[i])
+	end
+
+	memory.usememorydomain(return_domain)
+
+	return table.concat(block)
+
+end
+
+
+function readMemoryBlock_skipped(domain, start, block_size, skip_freq)
+
+	local return_domain = memory.getcurrentmemorydomain()
+
+	local block = {}
+
+	memory.usememorydomain(domain)
+
+	local bts = memory.readbyterange(start, block_size*skip_freq)
+
+	for i=0,block_size-1 do
+		block[i+1] = string.format("%02x", bts[i*skip_freq])
 	end
 
 
 	memory.usememorydomain(return_domain)
 
-	return block
+	return table.concat(block)
 
 end
 
 
 
+function READ_BYTE(addr)
 
+	return memory.readbyte(addr)
+
+end
+
+function WRITE_BYTE(addr, val)
+
+	return memory.writebyte(addr, val)
+
+end
+
+function READ_WORD(addr)
+
+	return READ_BYTE(addr) + 256*READ_BYTE(addr+1)
+
+end
+
+function WRITE_WORD(addr, val)
+	WRITE_BYTE(addr, val % 256)
+	WRITE_BYTE(addr+1, (val / 256) % 256)
+end
 
 local FRAME_COUNT = 2
 
@@ -275,6 +344,16 @@ local player = 1
 local currentJoypad = joypad.get(player)
 
 local frame = 0
+
+
+local P1_VRAM_A = -1
+local P1_VRAM_B = -1
+local P1_VRAM_C = -1
+local P1_VRAM_D = -1
+local P2_VRAM_A = -1
+local P2_VRAM_B = -1
+local P2_VRAM_C = -1
+local P2_VRAM_D = -1
 
 local END_TRANSMISSION = false
 
@@ -310,16 +389,42 @@ local check_map_updates = false
 
 local paused = false
 
-while true do
+
+console.clear()
+console.write("=======\n")
+console.write("Welcome to BooView's LuaSide (v" .. LUA_VERSION_NUMBER .. ") by MrL314!\n")
+console.write("=======")
+console.write("\n\n[INFO] Attempting to connect...")
+emu.frameadvance()
+
+
+if pcall(connect_client) then
 
 	END_TRANSMISSION = false
+
+	console.clear()
+	console.write("=======\n")
+	console.write("Welcome to BooView's LuaSide (v" .. LUA_VERSION_NUMBER .. ") by MrL314!\n")
+	console.write("=======")
+
+
+	local SYNCED = sync_with_server()
+
+	if SYNCED == false then
+		close_socket_client("Failed to connect to BooView.")
+		END_TRANSMISSION = true
+	end
+
+
+
 
 	while socket_client_is_open() do
 
 		
-
-
+		--local tmt = socket_client:gettimeout()
+		socket_client:settimeout(CURR_TIMEOUT)
 		local data = receive_data()
+		if socket_client_is_open() then socket_client:settimeout(SOCKET_TIMEOUT) end
 
 		
 
@@ -334,12 +439,7 @@ while true do
 		if string.sub(data, 1, 5) == "FRAME" then
 			--sync
 
-
-			if not sync_with_server() then
-				REASON = "BAD SYNC"
-				END_TRANSMISSION = true
-				break
-			end
+			
 			
 
 			
@@ -348,16 +448,19 @@ while true do
 				frame = 0
 			end
 
-			race_checkpoints = memory.readbyte(0x148)
 
-			track_num = memory.readbyte(0x124)
+			
 
-			--local x_pos = memory.read_u16_le(0x1018) * 4
-			--local y_pos = memory.read_u16_le(0x101c) * 4
-			--local heading = memory.readbyte(0x102b)
-			--local camera = memory.readbyte(0x0095)
+			race_checkpoints = READ_BYTE(0x148)
 
-			local game_type = memory.readbyte(0x2c)
+			track_num = READ_BYTE(0x124)
+
+			--local x_pos = READ_WORD(0x1018) * 4
+			--local y_pos = READ_WORD(0x101c) * 4
+			--local heading = READ_BYTE(0x102b)
+			--local camera = READ_BYTE(0x0095)
+
+			local game_type = READ_BYTE(0x2c)
 
 			currentJoypad = joypad.get(player)
 
@@ -369,70 +472,132 @@ while true do
 			character_bytes = "CH_DATA"
 
 			-- gamemode
-			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x36))
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x36))
+
+			-- camera mode
+			local cm = READ_BYTE(0x2e)
+			character_bytes = character_bytes .. string.format("%02x", cm)
 
 			
 
 			-- ghost enable
-			g_enable = memory.readbyte(RAM_HIGH_BANK + 0xff02)
+			g_enable = READ_BYTE(RAM_HIGH_BANK + 0xff02)
+			character_bytes = character_bytes .. string.format("%02x", g_enable)
+
 			if g_enable == 0 then
-				if memory.readbyte(0x11c1) > 0x84 then
-					g_enable = 2
+				if cm == 2 then
+					if READ_BYTE(0x11c1) > 0x84 then
+						g_enable = 2
+					end
+				elseif cm == 4 then 
+					if READ_BYTE(0x10c1) > 0x84 then
+						g_enable = 2
+					end
 				end
 			end
 
-			
-
 			character_bytes = character_bytes .. string.format("%02x", g_enable)
 
+
 			-- in demo?
-			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0xe32))
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0xe32))
 
 			-- game type
-			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x2C))
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x2C))
 
 			-- track number
-			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x124))
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x124))
 
 			-- track theme
-			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x126))
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x126))
 
 			-- theme object
-			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0xe30))
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0xe30))
 
 			-- camera angle
-			character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x95))
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x95))
+
+			-- camera pos x
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x4c))
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x4d))
+
+			-- camera pos y
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x52))
+			character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x53))
 			
 			
 
 			for i=0, 7 do
 
 				-- character number
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x12))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x12))
 
-				-- x position
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x18))
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x19))
-				-- y position
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x1c))
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x1d))
-				-- height
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x1f))
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x20))
+
+				-- x coord low
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x16))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x17))
+				-- x coord high
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x18))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x19))
+				-- y coord low
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x1a))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x1b))
+				-- y coord high
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x1c))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x1d))
+				-- z coord low
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x1e))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x1f))
+				-- z coord high
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x20))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x21))
+
+				-- x velocity
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x22))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x23))
+				-- y velocity
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x24))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x25))
+				-- z velocity
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x26))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x27))
+
+				-- speed
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xea))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xeb))
+
+				-- max speed
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xd6))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xd7))
+
+				-- acceleration
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xee))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xef))
+
+
 
 				-- heading angle
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x2b))
-				
-				-- x velocity
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x22))
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x23))
-				-- y velocity
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x24))
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x25))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x2a))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x2b))
+
+				-- momentum angle
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xa2))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xa3))
+
+				-- camera angle
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xa4))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xa5))
+
+				-- angular velocity
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xb2))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0xb3))
+
+
+
 
 
 				if race_checkpoints ~= 0 then
-					racer_cp = memory.readbyte(0x1000 + (i*0x100) + 0xc0)
+					racer_cp = READ_BYTE(0x1000 + (i*0x100) + 0xc0)
 					table_index = 2 * ((racer_cp)%race_checkpoints)
 				else
 					table_index = 0
@@ -440,11 +605,11 @@ while true do
 
 
 				-- checkpoint x position
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x900 + table_index))
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0x901 + table_index))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x900 + table_index))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0x901 + table_index))
 				-- checkpoint y position
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0xa00 + table_index))
-				character_bytes = character_bytes .. string.format("%02x", memory.readbyte(0xa01 + table_index))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0xa00 + table_index))
+				character_bytes = character_bytes .. string.format("%02x", READ_BYTE(0xa01 + table_index))
 			end
 
 
@@ -475,7 +640,7 @@ while true do
 			for i=0, 7 do
 
 				-- character number
-				---obj_bytes = obj_bytes .. string.format("%02x", memory.readbyte(0x1800 + (i*0x40) + 0x12))
+				---obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(0x1800 + (i*0x40) + 0x12))
 
 				base_address = base_obj_addresses[game_type/2 + 1][i + 1]
 
@@ -485,15 +650,24 @@ while true do
 				obj_bytes = obj_bytes .. string.format("%02x", (base_address % 256))
 				obj_bytes = obj_bytes .. string.format("%02x", (base_address / 256) % 256)
 
-				-- x position
-				obj_bytes = obj_bytes .. string.format("%02x", memory.readbyte(base_address + 0x18))
-				obj_bytes = obj_bytes .. string.format("%02x", memory.readbyte(base_address + 0x19))
-				-- y position
-				obj_bytes = obj_bytes .. string.format("%02x", memory.readbyte(base_address + 0x1c))
-				obj_bytes = obj_bytes .. string.format("%02x", memory.readbyte(base_address + 0x1d))
-				-- height
-				obj_bytes = obj_bytes .. string.format("%02x", memory.readbyte(base_address + 0x1f))
-				obj_bytes = obj_bytes .. string.format("%02x", memory.readbyte(base_address + 0x20))
+				-- x coord low
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x16))
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x17))
+				-- x coord high
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x18))
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x19))
+				-- y coord low
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1a))
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1b))
+				-- y coord high
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1c))
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1d))
+				-- z coord low
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1e))
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1f))
+				-- z coord high
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x20))
+				obj_bytes = obj_bytes .. string.format("%02x", READ_BYTE(base_address + 0x21))
 
 			end
 
@@ -515,15 +689,15 @@ while true do
 
 
 					-- is alive
-					item_bytes = item_bytes .. string.format("%02x", memory.readbyte(base_address + 0x13))
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x13))
 
 
 					-- character number
-					ch_num = memory.readbyte(base_address + 0x70)
-					item_bytes = item_bytes .. string.format("%02x", memory.readbyte(base_address + 0x70))
+					ch_num = READ_BYTE(base_address + 0x70)
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x70))
 					
 
-					user = memory.readbyte(base_address + 0x6b)
+					user = READ_BYTE(base_address + 0x6b)
 
 					if user == 0 then
 						user = 0x10
@@ -531,28 +705,37 @@ while true do
 
 					--console.write("\naddr " .. string.format("%04x", base_address) .. " val " .. string.format("%02x", ch_num) .. " user " .. string.format("%02x", user) .. "\n")
 
-					user_ch = memory.readbyte(user*256 + 0x12)
-					item_bytes = item_bytes .. string.format("%02x", memory.readbyte(user*256 + 0x12))
+					user_ch = READ_BYTE(user*256 + 0x12)
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(user*256 + 0x12))
 
-					-- x position
-					item_bytes = item_bytes .. string.format("%02x", memory.readbyte(base_address + 0x18))
-					item_bytes = item_bytes .. string.format("%02x", memory.readbyte(base_address + 0x19))
-					-- y position
-					item_bytes = item_bytes .. string.format("%02x", memory.readbyte(base_address + 0x1c))
-					item_bytes = item_bytes .. string.format("%02x", memory.readbyte(base_address + 0x1d))
-					-- height
-					item_bytes = item_bytes .. string.format("%02x", memory.readbyte(base_address + 0x1f))
-					item_bytes = item_bytes .. string.format("%02x", memory.readbyte(base_address + 0x20))
+					-- x coord low
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x16))
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x17))
+					-- x coord high
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x18))
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x19))
+					-- y coord low
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1a))
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1b))
+					-- y coord high
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1c))
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1d))
+					-- z coord low
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1e))
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x1f))
+					-- z coord high
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x20))
+					item_bytes = item_bytes .. string.format("%02x", READ_BYTE(base_address + 0x21))
 
 					-- heading angle
-					--item_bytes = item_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x2b))
+					--item_bytes = item_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x2b))
 					
 					-- x velocity
-					--item_bytes = item_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x22))
-					--item_bytes = item_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x23))
+					--item_bytes = item_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x22))
+					--item_bytes = item_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x23))
 					-- y velocity
-					--item_bytes = item_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x24))
-					--item_bytes = item_bytes .. string.format("%02x", memory.readbyte(0x1000 + (i*0x100) + 0x25))
+					--item_bytes = item_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x24))
+					--item_bytes = item_bytes .. string.format("%02x", READ_BYTE(0x1000 + (i*0x100) + 0x25))
 				end
 
 			end
@@ -569,7 +752,7 @@ while true do
 				--console.write("\nMAP RESET")
 
 				for i=1,0x4000 do
-					local tile = memory.readbyte(RAM_HIGH_BANK + i-1)
+					local tile = READ_BYTE(RAM_HIGH_BANK + i-1)
 					prev_map[i] = tile
 				end
 
@@ -584,7 +767,7 @@ while true do
 
 					local ch_offs = 0x1000 + (i-1)*0x100
 
-					local tile_ind = memory.read_u16_le(ch_offs + 0x58)
+					local tile_ind = READ_WORD(ch_offs + 0x58)
 
 
 					for xoff= -1 * (SENSING_RADIUS-1), (SENSING_RADIUS-1) do
@@ -594,7 +777,7 @@ while true do
 
 							if TILE_IND >= 0 and TILE_IND < 0x4000 then
 
-								local tile = memory.readbyte(RAM_HIGH_BANK + TILE_IND)
+								local tile = READ_BYTE(RAM_HIGH_BANK + TILE_IND)
 
 								if tile ~= prev_map[TILE_IND + 1] then
 
@@ -627,6 +810,16 @@ while true do
 
 
 
+			local SYNCED = sync_with_server()
+
+			if SYNCED == false then
+				REASON = "BAD SYNC"
+				END_TRANSMISSION = true
+				break
+				--emu.frameadvance()
+			end
+
+
 
 
 			send_data(character_bytes .. "\n" .. obj_bytes .. "\n" .. item_bytes .. "\n" .. map_updates .. "\n")
@@ -635,13 +828,8 @@ while true do
 
 
 
-			--[[
-			if receive_data() ~= "received data" then
-				close_socket_client("bad response on item data")
-				END_TRANSMISSION = true
-				break
-			end
-			--]]
+			
+			
 
 
 			emu.frameadvance();
@@ -653,26 +841,70 @@ while true do
 		
 
 
-			--[[
-			if not sync_with_server() then
-				REASON = "BAD SYNC"
-				END_TRANSMISSION = true
-				break
-			end
-			--]]
+			
+
+		elseif string.sub(data, 1, 9) == "GHOST_OFF" then
+
+			WRITE_WORD(0x1012, P1_VRAM_A)
+			WRITE_WORD(0x1014, P1_VRAM_B)
+			WRITE_WORD(0x10B6, P1_VRAM_C)
+			WRITE_WORD(0x10B8, P1_VRAM_D)
+			WRITE_WORD(0x1112, P2_VRAM_A)
+			WRITE_WORD(0x1114, P2_VRAM_B)
+			WRITE_WORD(0x11B6, P2_VRAM_C)
+			WRITE_WORD(0x11B8, P2_VRAM_D)
+
+			P1_VRAM_A = -1
+			P1_VRAM_B = -1
+			P1_VRAM_C = -1
+			P1_VRAM_D = -1
+			P2_VRAM_A = -1
+			P2_VRAM_B = -1
+			P2_VRAM_C = -1
+			P2_VRAM_D = -1
+
+
 
 		elseif string.sub(data, 1, 8) == "DO_GHOST" then
 
+			if P1_VRAM_A == -1 then
+				P1_VRAM_A = READ_WORD(0x1012)
+				P1_VRAM_B = READ_WORD(0x1014)
+				P1_VRAM_C = READ_WORD(0x10B6)
+				P1_VRAM_D = READ_WORD(0x10B8)
+				P2_VRAM_A = READ_WORD(0x1112)
+				P2_VRAM_B = READ_WORD(0x1114)
+				P2_VRAM_C = READ_WORD(0x11B6)
+				P2_VRAM_D = READ_WORD(0x11B8)
+			end
+
 			player = 0x1000
 			ghost = 0x1100
+
+			disp_mode = READ_BYTE(0x2e)
+
+			if disp_mode == 2 then
+				player = 0x1000
+				ghost = 0x1100
+			elseif disp_mode == 4 then
+				player = 0x1100
+				ghost = 0x1000
+			end
+
 			nonce = 0
 			
-			if memory.readbyte(ghost + 0xc1) < 0x85 then
+			if READ_BYTE(ghost + 0xc1) < 0x85 then
 				for i=0x00,0xff do
 
+					local no_write = false
+
 					if i == -1 then
-						nonce = 0
-					
+						no_write = true
+
+					elseif i >= 0x00 and i <= 0x0f then
+						no_write = true
+						
+					--[[
 					elseif i == 0x00 or i == 0x01 then
 						nonce = 0  -- helps with top screen ghosting
 					elseif i == 0x02 or i == 0x03 then
@@ -681,87 +913,64 @@ while true do
 					elseif i == 0x04 or i == 0x05 then
 						nonce = 0  -- NEED! means top screen not ghosty
 
-					elseif i == 0x08 or i == 0x08 then
+					elseif i == 0x06 or i == 0x07 then
+						nonce = 0  -- NEED! means top screen not ghosty
+
+					elseif i == 0x08 or i == 0x09 then
 						nonce = 0  -- fixes crash on exit
 
 
 					elseif i == 0x0a or i == 0x0b then
 						nonce = 0  -- NEED! Fixes bottom screen issue
 
+
+					elseif i == 0x0c or i == 0x0d then
+						nonce = 0  -- NEED! Fixes bottom screen issue
+
+					elseif i == 0x0e or i == 0x0f then
+						nonce = 0  -- NEED! Fixes bottom screen issue
+					--]]
+
+					--[[
+					elseif i >= 0x30 and i < 0x40 then
+						nonce = 0  -- is this needed?
 					
 						---- onto other data
+					--]]
+					--[[
+					elseif i >= 0xb6 and i <= 0xbd then
+						nonce = 0  -- NEED? Fixes VRAM stuff?
+
+					elseif i >= 0x70 and i <= 0x7f then
+						nonce = 0  -- NEED? Fixes VRAM stuff?
+					--]]
 
 					
 					
-
+					
 					elseif i == 0xd5 then
-						local flags = memory.readbyte(ghost + i)
+						local flags = READ_BYTE(ghost + i)
 
 						if flags % 2 == 1 then flags = flags - 1 end
 
-						memory.writebyte(player + i, flags)
+						WRITE_BYTE(player + i, flags)
+						no_write = true
+					end
 
 
-
-					
-
-					
-					else
-						memory.writebyte(player + i, memory.readbyte(ghost + i))
+					if no_write == false then
+						WRITE_BYTE(player + i, READ_BYTE(ghost + i))
 					end
 
 					
 				end
-
+			end
 		
 
-			--[[
-			for i=0x00,0xff do
+			
 
-				if i == -1 then
-					nonce = 0
-				
-				
-
-				
-
-				elseif i == 0x11 or i == 0x12 then
-					memory.writebyte(0x1000 + i, memory.readbyte(0x1100 + i))
-
-				elseif i == 0x13 or i == 0x14 or i == 0x15 then
-					memory.writebyte(0x1000 + i, memory.readbyte(0x1100 + i))
-
-				
-				elseif i >= 0x16 and i <= 0x27 then
-					memory.writebyte(0x1000 + i, memory.readbyte(0x1100 + i))
-				
-				
-				elseif i >= 0x98 or i <= 0x9f then
-					memory.writebyte(0x1000 + i, memory.readbyte(0x1100 + i))
-
-				--elseif i == 0xc4 or i == 0xc5 then
-				--	memory.writebyte(0x1000 + i, memory.readbyte(0x1100 + i))
-
-				
-				
-				--elseif i == 0xc4 or i == 0xc5 then
-				--	memory.writebyte(0x1000 + i, memory.readbyte(0x1100 + i))
-
-				
-				
-				
-
-
-				
-				
-				end
-
-				
-			end
-			--]]
-
-			memory.writebyte(0x94, memory.readbyte(ghost + 0xa4))
-			memory.writebyte(0x95, memory.readbyte(ghost + 0xa5))
+			--WRITE_BYTE(0x94, READ_BYTE(ghost + 0xa4))
+			--WRITE_BYTE(0x95, READ_BYTE(ghost + 0xa5))
 
 
 		
@@ -773,7 +982,7 @@ while true do
 			num_tiles = 0
 
 			for i=0,0x3fff do
-				local tile = memory.readbyte(RAM_HIGH_BANK + i)
+				local tile = READ_BYTE(RAM_HIGH_BANK + i)
 				if tile >= 0xc0 then
 					overlay_data = overlay_data .. string.format("%02x", i % 256)
 					overlay_data = overlay_data .. string.format("%02x", (i / 256) % 256)
@@ -786,9 +995,10 @@ while true do
 
 			send_data(overlay_data .. "\n")
 
+			emu.frameadvance();
+			frame = frame + 1
 
 
-		end
 
 
 		elseif string.sub(data, 1, 7) == "W_BYTES" then
@@ -815,7 +1025,7 @@ while true do
 						instr["addr"] = tonumber(toks[i+1])
 						i = i + 1
 					else
-						console.write("W_BYTES Error: no address specified")
+						console.write("[ERROR] W_BYTES Error: no address specified\n")
 						wasBad = true
 						break
 					end
@@ -828,12 +1038,12 @@ while true do
 						end
 						instr["data"] = W_BYTES
 					else
-						console.write("W_BYTES Error: no data specified")
+						console.write("[ERROR] W_BYTES Error: no data specified\n")
 						wasBad = true
 						break
 					end
 				else
-					console.write("W_BYTES Error: cannot understand " .. TOK)
+					console.write("[ERROR] W_BYTES Error: cannot understand " .. TOK .. "\n")
 					wasBad = true
 				end
 				i = i + 1
@@ -851,7 +1061,7 @@ while true do
 
 			for i=1, #instr["data"] do
 
-				memory.writebyte(instr["addr"] + i - 1, instr["data"][i])
+				WRITE_BYTE(instr["addr"] + i - 1, instr["data"][i])
 
 			end
 
@@ -865,35 +1075,54 @@ while true do
 		elseif string.sub(data, 1, 7) == "R_BYTES" then
 
 			-- request bytes data
+			frame = frame
 
+
+
+		elseif string.sub(data, 1, 5) == "YIELD" then
+			CURR_TIMEOUT = 0.01
+
+			paused = true
+
+
+
+
+		elseif string.sub(data, 1, 7) == "UNYIELD" then
+			
+			--CURR_TIMEOUT = nil
+			CURR_TIMEOUT = 0.01
+			paused = false
+			client.unpause()
 
 
 		elseif string.sub(data, 1, 5) == "PAUSE" then
+			CURR_TIMEOUT = 0.01
 
 			paused = true
 			--client.SetSoundOn(false)
 			--emu.frameadvance();
 			--client.pause()
 			--emu.yield();
-			console.write("\nPaused\n")
+
+			console.write("\n[INFO] Paused\n")
 			
-			while string.sub(receive_data(), 1, 7) ~= "UNPAUSE" do
-				frame = frame + 1
-				emu.frameadvance();
-			end
+
+			--socket_client:settimeout(0.01)
+			--while string.sub(receive_data(), 1, 7) ~= "UNPAUSE" do
+			--	frame = frame + 1
+			--	emu.frameadvance();
+			--end
+			--socket_client:settimeout(nil)
 
 
 
 
 		elseif string.sub(data, 1, 7) == "UNPAUSE" then
 			
-			--send_data("unpause\n")
+			CURR_TIMEOUT = 0.01
 			paused = false
 			client.unpause()
-			--client.SetSoundOn(true)
-			--frame = frame + 1
-			--emu.frameadvance();
-			console.write("Unpaused\n")
+			console.write("[INFO] Unpaused\n")
 
 
 
@@ -901,7 +1130,6 @@ while true do
 		elseif string.sub(data, 1, 6) == "W_SRAM" then
 
 			data = string.sub(data, 8, #data)
-			--console.write(string.sub(data, 0, 30))
 
 
 			local toks = tokenize(data)
@@ -912,7 +1140,7 @@ while true do
 				memory.usememorydomain("CARTRAM")
 
 				for i=0,#toks-1 do
-					memory.writebyte(i, tonumber(toks[i+1]))
+					WRITE_BYTE(i, tonumber(toks[i+1]))
 				end
 
 				memory.usememorydomain("WRAM")
@@ -926,6 +1154,9 @@ while true do
 
 		elseif string.sub(data, 1, 5) == "TRACK" then
 
+			emu.frameadvance();
+			frame = frame + 1
+
 			local track_data = ""
 			local nonce = ""
 
@@ -933,39 +1164,35 @@ while true do
 				track_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + ((i-1)*0x800), 0x800)
 				send_data(track_data .. "\n")
 				nonce = receive_data()
+
+				emu.frameadvance();
+				frame = frame + 1
 			end
-			--[[
-
-			track_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x1000, 0x1000)
-			send_data(track_data .. "\n")
-			nonce = receive_data()
-
-			track_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x2000, 0x1000)
-			send_data(track_data .. "\n")
-			nonce = receive_data()
-
-			track_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x3000, 0x1000)
-			send_data(track_data .. "\n")
-			--]]
+			
 
 
-		elseif string.sub(data, 1, 7) == "CP_DATA" then
+		elseif string.sub(data, 1, 4) == "ZONE" then
 
-			local cp_data = ""
+			emu.frameadvance();
+			frame = frame + 1
+
+			local zone_data = ""
 			local nonce = ""
 
 			for i=1,2 do
-				cp_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x5000 + (i-1)*0x800, 0x800)
-				send_data(cp_data .. "\n")
+				zone_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x5000 + (i-1)*0x800, 0x800)
+				send_data(zone_data .. "\n")
 				nonce = receive_data()
+
+				emu.frameadvance();
+				frame = frame + 1
 			end
-
-			--readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x5000, 0x1000)
-
-			--send_data(cp_data .. "\n")
 
 
 		elseif string.sub(data, 1, 4) == "FLOW" then
+
+			emu.frameadvance();
+			frame = frame + 1
 
 			local flow_data = ""
 			local nonce = ""
@@ -974,63 +1201,74 @@ while true do
 				flow_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x4000 + (i-1)*0x800, 0x800)
 				send_data(flow_data .. "\n")
 				nonce = receive_data()
+
+				emu.frameadvance();
+				frame = frame + 1
 			end
-
-			--local flow_data = readMemoryBlock("WRAM", RAM_HIGH_BANK + 0x4000, 0x1000)
-
-			--send_data(flow_data .. "\n")
+			
 
 
 		elseif string.sub(data, 1, 7) == "PALETTE" then
 
+			emu.frameadvance();
+			frame = frame + 1
+
 			local palette_data = readMemoryBlock("WRAM", 0x3a80, 0x200)
 
 			send_data(palette_data .. "\n")
+			emu.frameadvance();
+			frame = frame + 1
 
 
 		elseif string.sub(data, 1, 5) == "TILES" then
+
+			emu.frameadvance();
+			frame = frame + 1
+
 			local tile_data = ""
 			local nonce = ""
-			--console.write("\nStart tiles")
+			
 
-			for i=1,16 do
-				tile_data = readMemoryBlock("VRAM", (i-1) * 0x800, 0x800)
+			for i=1,8 do
+				tile_data = readMemoryBlock_skipped("VRAM", ((i-1) * 0x1000) + 1, 0x800, 2)
 				send_data(tile_data .. "\n")
 				nonce = receive_data()
+
+				emu.frameadvance();
+				frame = frame + 1
 			end
 
-			--[[
-			--console.write("\nIn tiles 1")
 
-			tile_data = readMemoryBlock("VRAM", 0x1000, 0x1000)
-			send_data(tile_data .. "\n")
-			nonce = receive_data()
-
-			--console.write("\nIn tiles 2")
-
-			tile_data = readMemoryBlock("VRAM", 0x2000, 0x1000)
-			send_data(tile_data .. "\n")
-			nonce = receive_data()
-
-			--console.write("\nIn tiles 3")
-
-			tile_data = readMemoryBlock("VRAM", 0x3000, 0x1000)
-			send_data(tile_data .. "\n")
+		elseif string.sub(data, 1, 7) == "CP_DATA" then
 			
-			--console.write("\nFinished Tiles")
-			--]]
+			emu.frameadvance();
+			frame = frame + 1
 
+			local cp_data = readMemoryBlock("WRAM", 0x800, 0x100)
+			send_data(cp_data .. "\n")
+
+			emu.frameadvance();
+			frame = frame + 1
 
 
 
 		elseif string.sub(data, 1, 9) == "RESET_MAP" then
 
+			emu.frameadvance();
+			frame = frame + 1
+
 			local return_domain = memory.getcurrentmemorydomain()
 			memory.usememorydomain("WRAM")
 
-			for i=1,0x4000 do
-				local tile = memory.readbyte(RAM_HIGH_BANK + i-1)
-				prev_map[i] = tile
+			local i = 1
+			for f=1,8 do
+				for k=1,0x800 do
+					local tile = READ_BYTE(RAM_HIGH_BANK + i-1)
+					prev_map[i] = tile
+					i = i + 1
+				end
+				emu.frameadvance();
+				frame = frame + 1
 			end
 
 			memory.usememorydomain(return_domain)
@@ -1068,7 +1306,7 @@ while true do
 
 
 
-				local tile_ind = memory.read_u16_le(ch_offs + 0x58)
+				local tile_ind = READ_WORD(ch_offs + 0x58)
 
 
 				for xoff= -1 * (SENSING_RADIUS-1), (SENSING_RADIUS-1) do
@@ -1078,7 +1316,7 @@ while true do
 
 						if TILE_IND >= 0 and TILE_IND < 0x4000 then
 
-							local tile = memory.readbyte(RAM_HIGH_BANK + TILE_IND)
+							local tile = READ_BYTE(RAM_HIGH_BANK + TILE_IND)
 
 							if tile ~= prev_map[TILE_IND + 1] then
 
@@ -1115,11 +1353,43 @@ while true do
 
 
 
+
+		elseif string.sub(data, 1, 8) == "ID_BVPY_" then
+
+			local num_id = string.sub(data, 9)
+
+
+			send_data("ID_BVLUA_" .. LUA_VERSION_NUMBER .. "\n")
+
+
+			if num_id ~= PY_VERSION_NUMBER then
+				-- bad data, close off
+				END_TRANSMISSION = true
+				REASON = "Cannot identify valid BooView script. Please make sure you are using version " .. LUA_VERSION_NUMBER .. " of BooView."
+				break
+			else
+				CLIENT_NAME = socket_client:getpeername() .. " (" .. data .. ")"
+				console.write("\n\n[INFO] ID: ID_BVLUA_" .. LUA_VERSION_NUMBER .. "\n[INFO] Connected to " .. CLIENT_NAME)
+			end
+
+
+
+
 		elseif data == "SOCKET_ERROR_TIMEOUT" then
 			--console.write("timeout")
-			close_socket_client("Client Timed Out")
-			END_TRANSMISSION = true
-			break
+			
+
+			--close_socket_client("Client Timed Out")
+			--END_TRANSMISSION = true
+			--break
+			frame = frame -- dummy operation
+			-- TODO is this correct???
+
+			if CURR_TIMEOUT ~= nil then
+				emu.frameadvance();
+				frame = frame + 1
+			end
+
 
 		elseif data == "received data" then
 
@@ -1137,7 +1407,7 @@ while true do
 			-- bad data, close off
 			END_TRANSMISSION = true
 			REASON = "BAD DATA"
-			console.write("\n" .. data)
+			console.write("[ERROR] BAD DATA\n" .. data .. "\n")
 			break
 		end	
 
@@ -1150,22 +1420,21 @@ while true do
 	end
 
 
-	if END_TRANSMISSION == true then
-		break
+	if socket_client ~= nil then
+		close_socket_client(REASON)
 	end
+	socket_client = nil
 
 
-	if true then--paused == false then
-		frame = frame + 1
-		emu.frameadvance();
-	end
+
+else
+	console.write("\n[INFO] Failed to connect to BooView socket. Please make sure to run BooView first!")
+
+	socket_client = nil
 end
 
 
-if socket_client ~= nil then
-	close_socket_client(REASON)
-end
-socket_client = nil
+
 
 
 

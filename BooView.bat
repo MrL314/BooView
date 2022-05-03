@@ -1,5 +1,4 @@
 @echo OFF
-rem python BooView.py
-BooView.exe
+py BooView.py
 pause
 @echo ON

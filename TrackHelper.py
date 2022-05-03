@@ -8,6 +8,8 @@ import random
 
 import Assets
 
+import time
+
 def word_to_RGB(w):
 	r = ((w       ) % 32) * 8
 	g = ((w   / 32) % 32) * 8
@@ -29,17 +31,15 @@ def word_to_RGB(w):
 def generate_palette(p_data):
 	pal_vals = []
 
-	i = 0
+
 	val = 0
-	while i < len(p_data):
-		if i % 2 == 0:
+	for i in range(len(p_data)):
+		if i & 1 == 0:
 			val = p_data[i]
 		else:
 			val += p_data[i] * 256
 
 			pal_vals.append(word_to_RGB(val))
-
-		i += 1
 
 	#pal = [pal_vals[i*8: (i+1)*8] for i in range(len(pal_vals)//8)]
 
@@ -84,30 +84,33 @@ def bytes_to_tile_buffer(tile_bytes, pal):
 
 
 
-def get_tile_imgs(t_data, p_data):
+def get_tile_buffs(t_data, p_data):
 
 	pal = generate_palette(p_data)
 
-	TILES = [bytes_to_tile_buffer(t_data[n * 64:(n + 1) * 64], pal) for n in range(len(t_data)//64)]
+	TILES = [bytearray(bytes_to_tile_buffer(t_data[n * 64:(n + 1) * 64], pal)) for n in range(len(t_data)//64)]
 
-	return [pygame.image.frombuffer(TILE, (8, 8), "RGB") for TILE in TILES]
+	return TILES
 
 
 
 
 def get_tilemap_from_data(m_data, t_data, p_data):
-
+	
 	MAP = pygame.Surface((1024, 1024))
 
-	TILE_IMGS = get_tile_imgs(t_data, p_data)
+	TILES = get_tile_buffs(t_data, p_data)
+
+	TILE_IMGS = [pygame.image.frombuffer(TILE, (8, 8), "RGB").convert() for TILE in TILES]
+
 
 	for y in range(128):
 		for x in range(128):
 			MAP.blit(TILE_IMGS[m_data[y * 128 + x]], (x * 8, y * 8))
 
-	return (MAP, TILE_IMGS)
+	rt = (bytearray(pygame.image.tostring(MAP, 'RGB')), TILES)
 
-
+	return rt
 
 
 
@@ -230,39 +233,121 @@ CP_COLS = {
 	"red": {"base": (255, 100, 100), "border": (255, 50, 50)},
 	"orange": {"base": (255, 200, 100), "border": (255, 100, 0)},
 	"green": {"base": (100, 255, 100), "border": (0, 255, 0)},
-	"yellow": {"base": (255, 255, 100), "border": (230, 230, 0)}
+	"yellow": {"base": (255, 255, 100), "border": (255, 255, 0)},
+	"blue": {"base": (150, 150, 255), "border": (100, 100, 255)}
 }
 
+
+
 cp_colors = (
-	CP_COLS["red"],
-	CP_COLS["orange"],
+	#CP_COLS["blue"],
 	CP_COLS["green"],
-	CP_COLS["yellow"]
+	CP_COLS["yellow"],
+	CP_COLS["orange"],
+	CP_COLS["red"]
 )
 
-'''
-red_tile    = pygame.image.frombuffer(pixels_to_bytes_alpha([(255, 100, 100)]*256, 100), (16, 16), "RGBA")
-orange_tile = pygame.image.frombuffer(pixels_to_bytes_alpha([(255, 200, 100)]*256, 100), (16, 16), "RGBA")
-green_tile  = pygame.image.frombuffer(pixels_to_bytes_alpha([(100, 255, 100)]*256, 100), (16, 16), "RGBA")
-yellow_tile = pygame.image.frombuffer(pixels_to_bytes_alpha([(255, 255, 100)]*256, 100), (16, 16), "RGBA")
-'''
 
 red_tile = make_base_cp_tile(CP_COLS["red"])
 orange_tile = make_base_cp_tile(CP_COLS["orange"])
 green_tile = make_base_cp_tile(CP_COLS["green"])
 yellow_tile = make_base_cp_tile(CP_COLS["yellow"])
+blue_tile = make_base_cp_tile(CP_COLS["blue"])
 
-cp_tiles = (red_tile, orange_tile, green_tile, yellow_tile)
-
-
-
-def get_cp_tile(cp_num, diff_map):
-
-
-	BORDER_WIDTH = 3
+#cp_tiles = (red_tile, orange_tile, green_tile, yellow_tile)
+#cp_tiles = (blue_tile, green_tile, yellow_tile, red_tile)
+cp_tiles = (green_tile, yellow_tile, orange_tile, red_tile)
 
 
-	cp_col = cp_num % 4							# which color to use based on the cp number
+
+
+
+POSSIBLE_ZONE_SHAPES = [
+	[[False, False, False], [False, False, False], [False, False, False]],
+	[[True, False, False], [False, False, False], [False, False, False]],
+	[[True, True, True], [False, False, False], [False, False, False]],
+	[[False, False, True], [False, False, False], [False, False, False]],
+	[[True, False, True], [False, False, False], [False, False, False]],
+	[[True, False, False], [True, False, False], [True, False, False]],
+	[[True, True, True], [True, False, False], [True, False, False]],
+	[[True, False, True], [True, False, False], [True, False, False]],
+	[[False, False, True], [False, False, True], [False, False, True]],
+	[[True, False, True], [False, False, True], [False, False, True]],
+	[[True, True, True], [False, False, True], [False, False, True]],
+	[[True, False, True], [True, False, True], [True, False, True]],
+	[[True, True, True], [True, False, True], [True, False, True]],
+	[[False, False, False], [False, False, False], [True, False, False]],
+	[[True, False, False], [False, False, False], [True, False, False]],
+	[[True, True, True], [False, False, False], [True, False, False]],
+	[[False, False, True], [False, False, False], [True, False, False]],
+	[[True, False, True], [False, False, False], [True, False, False]],
+	[[False, False, True], [False, False, True], [True, False, True]],
+	[[True, False, True], [False, False, True], [True, False, True]],
+	[[True, True, True], [False, False, True], [True, False, True]],
+	[[False, False, False], [False, False, False], [True, True, True]],
+	[[True, False, False], [False, False, False], [True, True, True]],
+	[[True, True, True], [False, False, False], [True, True, True]],
+	[[False, False, True], [False, False, False], [True, True, True]],
+	[[True, False, True], [False, False, False], [True, True, True]],
+	[[True, False, False], [True, False, False], [True, True, True]],
+	[[True, True, True], [True, False, False], [True, True, True]],
+	[[True, False, True], [True, False, False], [True, True, True]],
+	[[False, False, True], [False, False, True], [True, True, True]],
+	[[True, False, True], [False, False, True], [True, True, True]],
+	[[True, True, True], [False, False, True], [True, True, True]],
+	[[True, False, True], [True, False, True], [True, True, True]],
+	[[True, True, True], [True, False, True], [True, True, True]],
+	[[False, False, False], [False, False, False], [False, False, True]],
+	[[True, False, False], [False, False, False], [False, False, True]],
+	[[True, True, True], [False, False, False], [False, False, True]],
+	[[False, False, True], [False, False, False], [False, False, True]],
+	[[True, False, True], [False, False, False], [False, False, True]],
+	[[True, False, False], [True, False, False], [True, False, True]],
+	[[True, True, True], [True, False, False], [True, False, True]],
+	[[True, False, True], [True, False, False], [True, False, True]],
+	[[False, False, False], [False, False, False], [True, False, True]],
+	[[True, False, False], [False, False, False], [True, False, True]],
+	[[True, True, True], [False, False, False], [True, False, True]],
+	[[False, False, True], [False, False, False], [True, False, True]],
+	[[True, False, True], [False, False, False], [True, False, True]]
+]
+
+
+# storage for already-generated 
+PRE_GEN_TILES = {
+	0: {},
+	1: {},
+	2: {},
+	3: {}
+}
+
+
+df_hsh = (
+	(0x01, 0x40, 0x02),
+	(0x80, 0x00, 0x20),
+	(0x08, 0x10, 0x04)
+)
+
+
+
+
+def diff_hash(diff_map):
+
+	h = 0
+	for i in range(3):
+		for j in range(3):
+			if diff_map[i][j]: h += df_hsh[i][j]
+
+	return h
+
+
+def gen_cp_tile(cp_attribute, diff_map):
+
+
+	BORDER_WIDTH = 1
+
+
+	cp_col = cp_attribute % 4					# which color to use based on the cp speed setting
 	border_map = fix_diff_surround(diff_map)	# adjusted border map to fix corner overwriting
 
 
@@ -406,6 +491,30 @@ def get_cp_tile(cp_num, diff_map):
 
 
 
+def gen_cp_tiles():
+	global PRE_GEN_TILES
+
+	PRE_GEN_TILES = {
+		0: {},
+		1: {},
+		2: {},
+		3: {}
+	}
+
+	for S in POSSIBLE_ZONE_SHAPES:
+		for attr in range(4):
+			tile = gen_cp_tile(attr, S)
+			PRE_GEN_TILES[attr][diff_hash(S)] = pygame.transform.smoothscale(
+				tile, 								# zone tile
+				(16, 16)							# resize to a "16x16" image
+			).convert_alpha()
+
+
+
+
+def get_cp_tile(cp_attribute, diff_map):
+
+	return PRE_GEN_TILES[cp_attribute % 4][diff_hash(fix_diff_surround(diff_map))]
 
 
 
@@ -415,14 +524,32 @@ def get_cp_tile(cp_num, diff_map):
 
 
 
+def gen_arrow_images():
+	global ROTATED_ARROWS
+
+	# pre-generate arrow images, saves time when rendering map!
+	ROTATED_ARROWS = []
+
+	for i in range(256):
+		flow_angle = -(360 * i / 255)
+		ROTATED_ARROWS.append(pygame.transform.smoothscale(
+			Assets.rot_image(Assets.ARROW_IMAGE, flow_angle), 	# rotated arrow image
+			(16, 16)											# resize to a "16x16" image
+		).convert_alpha())
 
 
-def get_cpmap_flowmap_from_data(cp_data, flow_data):
+
+
+
+
+def get_cpmap_flowmap_from_data(zone_data, flow_data, cp_attr):
+	global ROTATED_ARROWS
 	"""Generate the images for the overlay for the cp and flow maps"""
 
-	CP_MAP   = pygame.Surface((1024, 1024), SRCALPHA)	#  cp  map base surface, SRCALPHA to set as alpha enabled
-	FLOW_MAP = pygame.Surface((1024, 1024), SRCALPHA)	# flow map base surface, SRCALPHA to set as alpha enabled
+	
 
+	ZONE_MAP = pygame.Surface((1024, 1024), SRCALPHA)	# zone map base surface, SRCALPHA to set as alpha enabled
+	FLOW_MAP = pygame.Surface((1024, 1024), SRCALPHA)	# flow map base surface, SRCALPHA to set as alpha enabled
 
 
 	# pad the borders of the cp map in order to handle literal edge cases later
@@ -430,11 +557,11 @@ def get_cpmap_flowmap_from_data(cp_data, flow_data):
 
 	for y in range(64):
 		for x in range(64):
-			cp_padded[y+1][x+1] = cp_data[y * 64 + x]
+			cp_padded[y+1][x+1] = zone_data[y * 64 + x] & 0x7f
 
 
-
-
+	#flow_time = 0
+	#zone_time = 0
 
 	# checkpoint and flow maps are a 64x64 table
 	for y in range(64):
@@ -453,23 +580,25 @@ def get_cpmap_flowmap_from_data(cp_data, flow_data):
 
 			######## make flow map tile
 
-			flow_angle = -(360 * flow_data[y * 64 + x] / 255)
-			arr_img = pygame.transform.smoothscale(
-												Assets.rot_image(Assets.ARROW_IMAGE, flow_angle),	# rotated arrow image
-												(16, 16))											# resize to a 16x16 image
-											
+			#t1 = time.perf_counter()
+
 			# blit flow arrow onto map
 			FLOW_MAP.blit(
-				arr_img, 			# rotated arrow image
-				(x * 16, y * 16))	# convert tile xy to coordinate xy
-			
+				ROTATED_ARROWS[flow_data[y * 64 + x]],			# rotated arrow image
+				(x * 16, y * 16)	# convert tile xy to coordinate xy
+			)
+
+			#flow_time += time.perf_counter() - t1
 
 
 
 
 			######## make cp map tile
 
+			#t1 = time.perf_counter()
+
 			diff_map = [[False for j in range(3)] for i in range(3)]
+			
 
 			# check the 3x3 area around current cp, to make the border for the tile
 			for y_off in range(3):
@@ -478,24 +607,20 @@ def get_cpmap_flowmap_from_data(cp_data, flow_data):
 
 					if cp_num != other_cp:	diff_map[y_off][x_off] = True	# set proper "different checkpoint" index
 
-
-			cp_img = pygame.transform.smoothscale(
-											get_cp_tile(cp_num, diff_map),	# get the cp tile, with borders
-											(16, 16))						# resize to a 16x16 block
 										
-			CP_MAP.blit(
-				cp_img, 			# resized bordered cp tile
-				(x * 16, y * 16))	# convert tile xy to coordinate xy
+			ZONE_MAP.blit(
+				get_cp_tile(cp_attr[cp_num * 2], diff_map),		# get the cp tile, with borders
+				(x * 16, y * 16)								# convert tile xy to coordinate xy
+			)
 			
 
+			#zone_time += time.perf_counter() - t1
 
 
+	#print("ZONE:", 1000 * zone_time)
+	#print("FLOW:", 1000 * flow_time)
 
-
-
-	CP_IMAGE = CP_MAP.copy() # pygame.image.frombuffer(CP_TILES, )
-	FLOW_IMAGE = FLOW_MAP.copy() #
-	return (CP_IMAGE, FLOW_IMAGE)
+	return (pygame.image.tostring(ZONE_MAP, 'RGBA'), pygame.image.tostring(FLOW_MAP, 'RGBA'))
 
 
 

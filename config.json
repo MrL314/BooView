@@ -1,4 +1,6 @@
 {
 	"window_size": 512,
-	"FRAME_SKIP": 0
+	"FRAME_SKIP": 0,
+	"max_trail_length": 6000,
+	"trail_log_rate": 2
 }

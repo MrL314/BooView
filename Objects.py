@@ -3,10 +3,15 @@ import pygame
 from pygame.gfxdraw import *
 from pygame.locals import *
 
+from collections import deque
+
 import math
 
 
 import Assets
+
+
+
 
 
 global CHARACTER_NAMES
@@ -21,7 +26,7 @@ def CHAR_NUM_TO_NAME(n):
 		if n%2==0:
 			return CHARACTER_NAMES[n//2]
 		else:
-			raise IndexError("Invalid Character Number")
+			raise IndexError("Invalid Character Number: " + str(n))
 	else:
 		# fix up later to include the items
 		return "arrow"
@@ -120,6 +125,7 @@ class Game_Object(object):
 		self.ID = OBJ_ID
 		self.address = address
 		self.win_scl = 1
+		#self.tex = img
 
 	@property
 	def x(self):
@@ -169,6 +175,8 @@ class Game_Object(object):
 		return self._img
 	@img.setter
 	def img(self, _img):
+		_t = _img
+
 		obj_name = ""
 		if type(_img) == type(""):
 			obj_name = _img
@@ -179,6 +187,28 @@ class Game_Object(object):
 			_img = Assets.GET_IMAGE(obj_name)
 		
 		self._img = _img
+
+		self.tex = _t
+
+
+
+	@property
+	def tex(self):
+		return self._tex
+	@tex.setter
+	def tex(self, _tex):
+		obj_name = ""
+		if type(_tex) == type(""):
+			obj_name = _tex
+		else:
+			pass
+
+		if obj_name != "":
+			_tex = Assets.GET_TEXTURE(obj_name)
+
+		#print("Setting tex to", _tex)
+		
+		self._tex = _tex
 
 	@property
 	def scl(self):
@@ -202,6 +232,7 @@ class Game_Object(object):
 	@angle.setter
 	def angle(self, _angle):
 		self._angle = _angle
+
 
 	@property
 	def surface(self):
@@ -233,30 +264,56 @@ class Game_Object(object):
 		self.surface = main_surface
 
 
-	def display(self):
+	def display(self, d_method=None):
 		
 		z_scl = self.z
 		if z_scl > 0x8000:
 			z_scl -= 0x10000
 		z_scl /= 0x2000
 		z_scl += 1
-		#IMG = pygame.transform.smoothscale(self.img, (self.scl, self.scl))
-		#IMG = pygame.transform.scale(self.img, (math.floor(self.scl * z_scl / self.win_scl), math.floor(self.scl * z_scl / self.win_scl)))
-		IMG = pygame.transform.scale(self.img, (math.floor(self.scl * z_scl), math.floor(self.scl * z_scl)))
-		#IMG = pygame.transform.smoothscale(self.img, (self.img.get_width()*self.scl, self.img.get_height()*self.scl))
-		#IMG = pygame.transform.scale(self.img, (self.img.get_width()*self.scl, self.img.get_height()*self.scl))
-		IMG = Assets.rot_image(IMG, self.angle)
-		
-		'''
-		self.surface.blit(IMG, (
-			math.floor( (self.disp_x-(IMG.get_width()  ))//self.win_scl), 
-			math.floor( (self.disp_y-(IMG.get_height() ))//self.win_scl)
-		))
-		'''
-		self.surface.blit(IMG, (
-			math.floor( ((self.disp_x)-(IMG.get_width() / 2 ))), 
-			math.floor( ((self.disp_y)-(IMG.get_height()/ 2 )))
-		))
+
+		#if z_scl > 10: print(self.z)
+		if d_method == None:
+			"""
+
+			#IMG = pygame.transform.smoothscale(self.img, (self.scl, self.scl))
+			#IMG = pygame.transform.scale(self.img, (math.floor(self.scl * z_scl / self.win_scl), math.floor(self.scl * z_scl / self.win_scl)))
+			IMG = pygame.transform.scale(self.img, (math.floor(self.scl * z_scl), math.floor(self.scl * z_scl)))
+			#IMG = pygame.transform.smoothscale(self.img, (self.img.get_width()*self.scl, self.img.get_height()*self.scl))
+			#IMG = pygame.transform.scale(self.img, (self.img.get_width()*self.scl, self.img.get_height()*self.scl))
+			IMG = Assets.rot_image(IMG, self.angle)
+			
+			'''
+			self.surface.blit(IMG, (
+				math.floor( (self.disp_x-(IMG.get_width()  ))//self.win_scl), 
+				math.floor( (self.disp_y-(IMG.get_height() ))//self.win_scl)
+			))
+			'''
+			self.surface.blit(IMG, (
+				math.floor( ((self.disp_x)-(IMG.get_width() / 2 ))), 
+				math.floor( ((self.disp_y)-(IMG.get_height()/ 2 )))
+			))
+			"""
+
+		else:
+
+			d_method(
+				self.tex, 
+				pos=(
+					self.disp_x, 
+					self.disp_y
+				), 
+				dim=(
+					self.scl * z_scl, 
+					self.scl * z_scl
+				), 
+				rot=(
+					0, 
+					0, 
+					self.angle
+				),
+				centered=True
+			)
 
 
 
@@ -276,19 +333,32 @@ class Racer(Game_Object):
 	def __init__(self, x=-100, y=-100, angle=0, obj_name="", surface=None, OBJ_ID="", display_dest=False, img_scale=1, address=0):
 		super().__init__(x, y, angle, obj_name, surface, OBJ_ID, img_scale=img_scale, address=address)
 
-		self.vel = (0, 0)
+		self.vel = (0, 0, 0)
+		self.speed = 0
+		self.max_speed = 0
+		self.accel = 0
+		self.v_angle = 0
+		self.c_angle = 0
+		self.angle_vel = 0
 		self.dest = (x, y)
 		self.display_dest = display_dest
 		self.ch_num = -1
 		self.buttons = 0
 
-		self.prev_positions = []
-		
+		'''
+		self.prev_positions = deque()
+		self.p_pos_counter = deque()
+		self.trail_cbuff_len = 0
+		self.trail_disp_len = 0
+		self.avg_speed = 0
+		'''
+
+		self.reset_trail()
+
 		self.log = 0
 
-	@property
-	def speed(self):
-		return (self.vel[0]**2 + self.vel[1]**2)**0.5
+		self.max_trails = 0
+		self._show_trails = self.show_trails = False
 
 	@property
 	def vel(self):
@@ -296,6 +366,53 @@ class Racer(Game_Object):
 	@vel.setter
 	def vel(self, _vel):
 		self._vel = _vel
+
+
+	@property
+	def speed(self):
+		return self._speed
+	@speed.setter
+	def speed(self, _speed):
+		self._speed = _speed
+
+	@property
+	def max_speed(self):
+		return self._max_speed
+	@max_speed.setter
+	def max_speed(self, _max_speed):
+		self._max_speed = _max_speed
+
+
+	@property
+	def accel(self):
+		return self._accel
+	@accel.setter
+	def accel(self, _accel):
+		self._accel = _accel
+
+
+	@property
+	def v_angle(self):
+		return self._v_angle
+	@v_angle.setter
+	def v_angle(self, _v_angle):
+		self._v_angle = _v_angle
+
+
+	@property
+	def c_angle(self):
+		return self._c_angle
+	@c_angle.setter
+	def c_angle(self, _c_angle):
+		self._c_angle = _c_angle
+
+
+	@property
+	def angle_vel(self):
+		return self._angle_vel
+	@angle_vel.setter
+	def angle_vel(self, _angle_vel):
+		self._angle_vel = _angle_vel
 
 
 	@property
@@ -319,7 +436,6 @@ class Racer(Game_Object):
 	@property
 	def dest(self):
 		return self._dest
-
 	@dest.setter
 	def dest(self, _dest):
 		self._dest = _dest
@@ -328,14 +444,73 @@ class Racer(Game_Object):
 	@property
 	def buttons(self):
 		return self._buttons
-
 	@buttons.setter
 	def buttons(self, _buttons):
 		self._buttons = _buttons
+
+
+	@property
+	def max_trails(self):
+		return self._max_trails
+	@max_trails.setter
+	def max_trails(self, _max_trails):
+		self._max_trails = _max_trails
+
+	@property
+	def show_trails(self):
+		return self._show_trails
+	@show_trails.setter
+	def show_trails(self, _show_trails):
+		if _show_trails != self._show_trails: self.reset_trail()
+
+		self._show_trails = _show_trails
+
+	
+	
 	
 
-	def clear_trail(self):
-		self.prev_positions = []
+	def reset_trail(self):
+		self.prev_positions = deque()
+		self.p_pos_counter = deque()
+		self.trail_cbuff_len = 0
+		self.trail_len = 0
+		self.avg_speed = 0
+
+		self.prev_x = None
+		self.prev_y = None
+		#self.last_s = None
+
+
+	def copy_trail(self, other):
+		self.trail_cbuff_len = other.trail_cbuff_len + 0
+		self.trail_len = other.trail_len + 0
+		self.avg_speed = other.avg_speed + 0
+		self.log = other.log + 0
+
+		if other.prev_x == None:
+			self.prev_x = None
+		else:
+			self.prev_x = other.prev_x + 0
+		
+		if other.prev_y == None:
+			self.prev_y = None
+		else:
+			self.prev_y = other.prev_y + 0
+
+
+
+		self.prev_positions = deque()
+		self.p_pos_counter = deque()
+
+		for i in range(len(other.prev_positions)):
+			self.prev_positions.append(0 + other.prev_positions[i])
+
+		for i in range(len(other.p_pos_counter)):
+			self.p_pos_counter.append(0 + other.p_pos_counter[i])
+		'''
+		self.prev_positions = other.prev_positions
+		self.p_pos_counter = other.p_pos_counter
+		'''
 
 
 	def display_on(self, surface=None):
@@ -348,49 +523,185 @@ class Racer(Game_Object):
 		self.display()
 		self.surface = main_surface
 
-	def reset_trail(self):
-		self.prev_positions = []
 
-	def display(self, SCREEN=None, trails=0, ghost=False):
+	def map_pos(self, pos, SCREEN):
+		return (pos[0]*SCREEN.SCALE + SCREEN.x, pos[1]*SCREEN.SCALE + SCREEN.y)
 
-		if self.log == 0:
+	def update_trails(self, trails=0, log_freq=6):
+		p_show = self.show_trails
+
+		if trails > 1: self.show_trails = True
+		else: self.show_trails = False
+
+
+
+
+
+		if self.show_trails:
+			self.max_trails = trails
+
+			self.avg_speed += self.speed
+
+
+			if self.log == log_freq-1:
+
+				
+				### OLD VERSION
+				######################################################################
+				"""
+
+				#if coord_fnc == None: coord_fnc = iden
+				#if speed_fnc == None: speed_fnc = iden
+
+				# add new position for trail
+
+				next_pos = (self.x, self.y)
+				next_spd = self.avg_speed/log_freq
+
+
+				
+
+				if self.trail_cbuff_len != 0:
+					self.prev_positions.popleft()
+					self.prev_positions.popleft()
+					self.prev_positions.popleft()
+
+				self.trail_cbuff_len += 1
+
+
+
+
+				#self.prev_positions.appendleft(0)	# dummy data
+				self.prev_positions.appendleft(next_spd)
+				self.prev_positions.appendleft(next_pos[1])
+				self.prev_positions.appendleft(next_pos[0])
+
+				self.prev_positions.appendleft(next_spd)
+				self.prev_positions.appendleft(next_pos[1])
+				self.prev_positions.appendleft(next_pos[0])
+				
+				
+
+
+
+				while self.trail_cbuff_len > self.max_trails: 
+
+					self.prev_positions.pop()
+					self.prev_positions.pop()
+					self.prev_positions.pop()
+
+					#self.prev_positions.pop()	# dummy
+
+
+					self.trail_cbuff_len -= 1
+				"""
+				##############################################################################
+
+
+				### NEW VERSION
+				######################################################################
+
+				# add new position for trail
+				
+				#next_pos = (self.x, self.y)
+				new_x = self.x
+				new_y = self.y
+				new_s = self.avg_speed/log_freq
+
+				new_pt = True
+
+				if self.prev_x != None:
+					if self.trail_cbuff_len != 0:
+						if self.prev_x == new_x and self.prev_y == new_y:
+							new_pt = False
+
+
+
+
+				self.prev_x = new_x
+				self.prev_y = new_y
+
+				self.trail_len += 1
+
+
+
+				if new_pt:
+
+					# append number of frames this position is held
+					self.p_pos_counter.append(1)
+
+					'''
+					# if there is a duplicate entry point, remove it from the queue
+					if self.trail_cbuff_len > 0:
+						self.prev_positions.pop()
+						self.prev_positions.pop()
+						self.prev_positions.pop()
+					'''
+
+					# append new point
+					self.prev_positions.append(new_x)
+					self.prev_positions.append(new_y)
+					self.prev_positions.append(new_s)
+
+					'''
+					# append copy of new point so display looks correct (maybe change later?)
+					self.prev_positions.append(new_x)
+					self.prev_positions.append(new_y)
+					self.prev_positions.append(new_s)
+					'''
+
+					# increment length of buffer
+					self.trail_cbuff_len += 1
+
+
+				else:
+					# increment number of frames last position is repeated
+					self.p_pos_counter[-1] += 1
+
+
+
+
+				while self.trail_len >= self.max_trails:
+
+					end_cnt = self.p_pos_counter[0] - 1
+
+					if end_cnt == 0:
+						# remove end point from position list
+						self.prev_positions.popleft()
+						self.prev_positions.popleft()
+						self.prev_positions.popleft()
+
+						# remove end count from count list
+						self.p_pos_counter.popleft()
+
+						# decrease buffer count
+						self.trail_cbuff_len -= 1
+					else:
+						# decrement count of end
+						self.p_pos_counter[0] = end_cnt
+
+					self.trail_len -= 1
+
+
+				######################################################################
 			
-			self.prev_positions = ([(self.x, self.y)] + self.prev_positions)[:trails]   # for TT ghost mode
-			#self.prev_positions = ([(self.x, self.y)] + self.prev_positions)[:20]
+			self.log += 1
+			if self.log == log_freq:
+				self.log = 0
+				self.avg_speed = 0
 
-		self.log += 1
-		if self.log == 3:
-			self.log = 0
-		if SCREEN != None:
-		
-
-			'''
-			for i in range(len(self.prev_positions) - 1):
-				x_0 = self.prev_positions[i][0]
-				y_0 = self.prev_positions[i][1]
-				x_1 = self.prev_positions[i+1][0]
-				y_1 = self.prev_positions[i+1][1]
-			'''
-
-			disp_prev_positions = [(x*SCREEN.SCALE + SCREEN.x, y*SCREEN.SCALE + SCREEN.y) for x,y in self.prev_positions]
-
-			if len(self.prev_positions) > 2:
-				#pygame.draw.lines(self.surface, (0, 0, 255), False, disp_prev_positions, 4)
-				pygame.draw.aalines(self.surface, (0, 255, 0), False, disp_prev_positions)
-				#pygame.draw.aalines(self.surface, (0, 255, 0), False, [(x+1, y  ) for x,y in disp_prev_positions])
-				#pygame.draw.aalines(self.surface, (0, 255, 0), False, [(x  , y+1) for x,y in disp_prev_positions])
-				#pygame.draw.aalines(self.surface, (0, 255, 0), False, [(x-1, y  ) for x,y in disp_prev_positions])
-				#pygame.draw.aalines(self.surface, (0, 255, 0), False, [(x  , y-1) for x,y in disp_prev_positions])
+		else:
+			if p_show: self.reset_trail()
 
 
+	def display(self, ghost=False, d_method=None):
 
 		if not ghost:
-			super().display()
-
-		if self.display_dest == True:
-			pygame.draw.circle(self.surface, (255, 255, 255), (math.floor(self.dest[0]), math.floor(self.dest[1])), math.floor(3*width/600))
+			super().display(d_method=d_method)
 
 
+
+def iden(x): return x
 
 
 
@@ -467,15 +778,15 @@ class Item(Game_Object):
 		self.surface = main_surface
 
 
-	def display(self):
-		super().display()
+	def display(self, d_method=None):
+		super().display(d_method=d_method)
 
 
 
 
 #=========================================================================================================================
 #
-#         ITEM CLASS
+#         OBSTACLE CLASS
 #
 #=========================================================================================================================
 
@@ -537,5 +848,5 @@ class Obstacle(Game_Object):
 		self.surface = main_surface
 
 
-	def display(self):
-		super().display()
+	def display(self, d_method=None):
+		super().display(d_method=d_method)
