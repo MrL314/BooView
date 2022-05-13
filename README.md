@@ -1,7 +1,7 @@
 
 ![BooView Logo](https://github.com/MrL314/BooView/blob/main/assets/icon.png)
 
-# BooView (v2.0) by MrL314
+# BooView (v2.1) by MrL314
 **Data Visualizer for Super Mario Kart (SNES) by MrL314**
 
 Please read through this README before starting!
@@ -32,8 +32,6 @@ Please read through this README before starting!
   - Combined with Trails mode, you can see the racing line of your best records!
 - OpenGL rendering back-end to utilize GPU for hardware rendering!
 - **Improved performance** to now handle >100% emulation speed!
-
-#### COMING SOON
 - View racer vector data such as facing-direction, momentum, camera direction, etc.
 - View racer target locations on the map
 - View players' viewable area as well as camera object tracking the players!
@@ -106,6 +104,8 @@ If you are having framerate issues, considering editting the options in the **co
 - `trail_log_rate` is how long between each position in the trail is polled 
   - 1 = every frame, 2 = every 2 frames, etc
   - For maximum accuracy, this should be set to 1
+- `flowmap_quality` is the quality level of the arrows in the flow map.
+    - Set to 1 by default (1024x1024 flowmap image size)
 
 
 

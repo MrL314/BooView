@@ -89,6 +89,17 @@ class BV_Instance():
 		FLOW_CBOX_VAR = tk.BooleanVar()
 		self.FLOW_CBOX   = tk.Checkbutton(CBOX_FRAME, text="Show Flowmap", variable=FLOW_CBOX_VAR, onvalue=True, offvalue=False, command=self.set_flow_var)
 
+		CAM_CBOX_VAR = tk.BooleanVar()
+		self.CAM_CBOX = tk.Checkbutton(CBOX_FRAME, text="Show Cameras", variable=CAM_CBOX_VAR, onvalue=True, offvalue=False, command=self.set_cam_var)
+
+		VEC_CBOX_VAR = tk.BooleanVar()
+		self.VEC_CBOX = tk.Checkbutton(CBOX_FRAME, text="Show Vectors", variable=VEC_CBOX_VAR, onvalue=True, offvalue=False, command=self.set_vec_var)
+
+		TGT_CBOX_VAR = tk.BooleanVar()
+		self.TGT_CBOX = tk.Checkbutton(CBOX_FRAME, text="Show Targets", variable=TGT_CBOX_VAR, onvalue=True, offvalue=False, command=self.set_tgt_var)
+
+
+
 
 
 		FOLLOW_FRAME = tk.LabelFrame(SIDE_FRAME, relief=GROOVE, text="FOLLOW RACER")
@@ -119,10 +130,13 @@ class BV_Instance():
 
 
 		self.TK_VARS = {
+			"CAM_CBOX": CAM_CBOX_VAR,
+			"VEC_CBOX": VEC_CBOX_VAR,
 			"SPRITE_SCALE": SPRITE_SCALE_VAR,
 			"TRAIL_CBOX": TRAIL_CBOX_VAR,
 			"ZONE_CBOX": ZONE_CBOX_VAR,
 			"FLOW_CBOX": FLOW_CBOX_VAR,
+			"TGT_CBOX": TGT_CBOX_VAR,
 
 		}
 
@@ -145,6 +159,9 @@ class BV_Instance():
 			[self.TRAIL_CBOX],
 			[self.ZONE_CBOX],
 			[self.FLOW_CBOX],
+			[self.CAM_CBOX],
+			[self.VEC_CBOX],
+			[self.TGT_CBOX],
 		]
 
 		
@@ -212,6 +229,18 @@ class BV_Instance():
 		self.show_zones = False
 		self.show_flows = False
 
+
+
+		self.SHOW_DIR_NORMALIZED = False
+		self.SHOW_CAMERA_ANGLE = False
+		self.SHOW_CAM = False
+		self.SHOW_VEL_VECTOR = False
+		self.SHOW_TARGETS = False
+		
+
+		self.SHOW_VEL_COMPONENTS = False
+		self.SHOW_VEL_NORMALIZED = False
+		self.SHOW_ACCELERATION = False
 
 		self.in_file_dialogue = False
 
@@ -302,6 +331,18 @@ class BV_Instance():
 
 		#if self.show_flows: self.FLOW_BUTTON.config(relief=PRESSED_RELIEF)
 		#else:               self.FLOW_BUTTON.config(relief=RAISED)
+
+
+	def set_cam_var(self):
+		self.SHOW_CAM = self.get_tkvar('CAM_CBOX')
+
+
+	def set_vec_var(self):
+		self.SHOW_DIR_NORMALIZED = self.SHOW_CAMERA_ANGLE = self.SHOW_VEL_VECTOR = self.get_tkvar('VEC_CBOX')
+
+
+	def set_tgt_var(self):
+		self.SHOW_TARGETS = self.get_tkvar('TGT_CBOX')
 
 
 

@@ -90,8 +90,8 @@ class character_bytes(object):
 
 
 
-PY_VERSION_NUMBER = "2.0"
-LUA_VERSION_NUMBER = "2.0"
+PY_VERSION_NUMBER = "2.1"
+LUA_VERSION_NUMBER = "2.1"
 
 CH_BYTES = character_bytes()
 OBJ_BYTES = character_bytes()
@@ -871,6 +871,9 @@ TILEMAP_TEX = None
 CPMAP_TEX = None
 FLOWMAP_TEX = None
 
+ZONE_SCL = 1
+FLOW_SCL = config["flowmap_quality"]
+
 
 
 def make_map_textures(m_data, t_data, p_data, z_data, f_data, c_data, THREADED=False):
@@ -885,6 +888,12 @@ def make_map_textures(m_data, t_data, p_data, z_data, f_data, c_data, THREADED=F
 	global TILEMAP_IMAGE
 	global ZONEMAP_IMAGE
 	global FLOWMAP_IMAGE
+
+
+	TrackHelper.set_render_quality(
+		zone_scl=ZONE_SCL,	# scale factor for zone map, for crispier zones!
+		flow_scl=FLOW_SCL	# scale factor for flow map, for crispier arrows!
+	)
 
 
 
@@ -904,6 +913,9 @@ def make_map_textures(m_data, t_data, p_data, z_data, f_data, c_data, THREADED=F
 
 	map_ready = True
 
+	#pygame.image.save(create_surface_from_buff(TILEMAP, (1024, 1024), ALPHA=False), "TRACK/TILEMAP.png")
+	#pygame.image.save(create_surface_from_buff(ZONEMAP, (1024*ZONE_SCL, 1024*ZONE_SCL)), "TRACK/ZONEMAP.png")
+	#pygame.image.save(create_surface_from_buff(FLOWMAP, (1024*FLOW_SCL, 1024*FLOW_SCL)), "TRACK/FLOWMAP.png")
 
 
 
@@ -945,8 +957,8 @@ def update_zone_flow():
 	global ZONEMAP_TEX
 	global FLOWMAP_TEX
 
-	ZONEMAP_TEX = Assets.buffToGLTex(ZONEMAP, (1024, 1024), ZONEMAP_TEX, ALPHA=True)
-	FLOWMAP_TEX = Assets.buffToGLTex(FLOWMAP, (1024, 1024), FLOWMAP_TEX, ALPHA=True)
+	ZONEMAP_TEX = Assets.buffToGLTex(ZONEMAP, (1024*ZONE_SCL, 1024*ZONE_SCL), ZONEMAP_TEX, ALPHA=True)
+	FLOWMAP_TEX = Assets.buffToGLTex(FLOWMAP, (1024*FLOW_SCL, 1024*FLOW_SCL), FLOWMAP_TEX, ALPHA=True)
 
 
 
@@ -1384,6 +1396,83 @@ def GEN_SHADERS():
 
 
 	###################################################################################
+	##### LINE SETS SHADER
+	###################################################################################
+	global LINESET_VERTEX_SHADER
+	global LINESET_FRAGMENT_SHADER
+	global LINESET_SHADER
+	###################################################################################
+	LINESET_VERTEX_SHADER = shaders.compileShader("""
+		#version 460
+
+		in vec2 vin_pos;
+		in vec4 vin_col;
+
+		uniform float S_w;
+		uniform float S_h;
+		uniform float S_x;
+		uniform float S_y;
+		uniform float W_w;
+		uniform float W_h;
+
+		out vec4 vout_col;
+
+
+		float toGL_X(float x)
+		{
+			return 2 * ((S_x + S_w * x) / W_w) - 1;
+		}
+
+		float toGL_Y(float y)
+		{
+			return -1 * (2 * ((S_y + S_h * y) / W_h) - 1);
+		}
+
+
+		void main()
+		{
+			gl_Position = vec4(toGL_X(vin_pos[0]), toGL_Y(vin_pos[1]), 0.0f, 1.0f);
+			vout_col = vin_col;
+		}
+
+		""", GL_VERTEX_SHADER)
+
+
+	LINESET_FRAGMENT_SHADER = shaders.compileShader("""
+		#version 460
+		
+		in vec4 vout_col;
+		out vec4 fragColor;
+
+		void main()
+		{
+			//fragColor = vec4(vout_col, 1.0);
+			fragColor = vout_col;
+		}
+		""", GL_FRAGMENT_SHADER)
+
+
+
+	LINESET_SHADER = shaders.compileProgram(LINESET_VERTEX_SHADER, LINESET_FRAGMENT_SHADER)
+	###################################################################################
+	global lset_S_w
+	global lset_S_h
+	global lset_S_x
+	global lset_S_y
+	global lset_W_w
+	global lset_W_h
+
+	lset_S_w = glGetUniformLocation(LINESET_SHADER, "S_w")
+	lset_S_h = glGetUniformLocation(LINESET_SHADER, "S_h")
+	lset_S_x = glGetUniformLocation(LINESET_SHADER, "S_x")
+	lset_S_y = glGetUniformLocation(LINESET_SHADER, "S_y")
+	lset_W_w = glGetUniformLocation(LINESET_SHADER, "W_w")
+	lset_W_h = glGetUniformLocation(LINESET_SHADER, "W_h")
+	###################################################################################
+
+
+
+	###################################################################################
 	##### SCREEN RENDER SHADER
 	###################################################################################
 	global SCREEN_VERTEX_SHADER
@@ -1615,6 +1704,684 @@ def racer_has_camera(racer_num):
 
 
 
+def draw_line(v_a=(0, 0), v_b=(0,0), c_a=(0.0, 0.0, 0.0, 1.0), c_b=(0.0, 0.0, 0.0, 1.0)):
+	global ls_vdata
+	global ls_cdata
+	global ls_numl
+
+
+	#######################
+	# Vertex 1
+	#######################
+	
+	# Position
+	ls_vdata.append(v_a[0])
+	ls_vdata.append(v_a[1])
+
+	# Color
+	ls_cdata.append(c_a[0])
+	ls_cdata.append(c_a[1])
+	ls_cdata.append(c_a[2])
+
+	# alpha channel
+	try: ls_cdata.append(c_a[3])
+	except IndexError: ls_cdata.append(1.0)
+
+	#######################
+	# Vertex 2
+	#######################
+
+	# Position
+	ls_vdata.append(v_b[0])
+	ls_vdata.append(v_b[1])
+
+	# Color
+	# Color
+	ls_cdata.append(c_b[0])
+	ls_cdata.append(c_b[1])
+	ls_cdata.append(c_b[2])
+
+	# alpha channel
+	try: ls_cdata.append(c_b[3])
+	except IndexError: ls_cdata.append(1.0)
+
+	ls_numl += 1
+
+
+def draw_lines(pnts, cols):
+
+	L_p = len(pnts)
+	L_c = len(cols)
+
+	if L_p != L_c: raise IndexError("Mismatched sizes between points and color sets: pnts: " + str(L_p) + ", cols: " + str(L_c))
+
+	for i in range(L_p - 1): 
+		draw_line(
+			v_a = pnts[i], 
+			v_b = pnts[i+1], 
+			c_a = cols[i], 
+			c_b = cols[i+1]
+		)
+
+
+
+
+def DRAW_LINESET():
+	global ls_vdata
+	global ls_cdata
+	global ls_numl
+
+	glBindVertexArray(VAO1)
+	
+	glBindBuffer(GL_ARRAY_BUFFER, VBO1)
+	#glBufferData(GL_ARRAY_BUFFER, ls_numl*(2*2)*4, (c_float*(ls_numl*(2*2)))(*ls_vdata), GL_STATIC_DRAW)
+	glBufferData(GL_ARRAY_BUFFER, ls_numl*16, (c_float*(ls_numl*4))(*ls_vdata), GL_STATIC_DRAW)
+	glVertexAttribPointer(glGetAttribLocation(LINESET_SHADER, 'vin_pos'), 2, GL_FLOAT, GL_FALSE, 0, None)
+	glEnableVertexAttribArray(0)
+
+	glBindBuffer(GL_ARRAY_BUFFER, VBO2)
+	#glBufferData(GL_ARRAY_BUFFER, ls_numl*(4*2)*4, (c_float*(ls_numl*(4*2)))(*ls_cdata), GL_STATIC_DRAW)
+	glBufferData(GL_ARRAY_BUFFER, ls_numl*32, (c_float*(ls_numl*8))(*ls_cdata), GL_STATIC_DRAW)
+	glVertexAttribPointer(glGetAttribLocation(LINESET_SHADER, 'vin_col'), 4, GL_FLOAT, GL_FALSE, 0, None)
+	glEnableVertexAttribArray(1)
+
+	glDrawArrays(GL_LINES, 0, ls_numl*2) # The *2 here is necessary
+
+
+
+
+def SHOW_WIDTH_1_VECTORS():
+	global ls_vdata
+	global ls_cdata
+	global ls_numl
+
+	LW = max(1, VEC_W * screen.w / MAP_W * (1 / NUM_WIDTHS))
+	glLineWidth(LW)
+
+
+	ls_numl = 0
+	ls_vdata = []
+	ls_cdata = []
+
+	# show velocity data
+	for i in range(7, -1, -1):
+
+		if not is_active_racer(i): continue
+
+		OBJ = OBJECTS[i]
+
+		OBJ_x = OBJ.x
+		OBJ_y = OBJ.y
+		OBJ_vel = OBJ.vel
+		OBJ_vx = OBJ_vel[0]/256
+		OBJ_vy = OBJ_vel[1]/256
+		OBJ_vz = OBJ_vel[2]#/256
+		OBJ_spd = OBJ.speed/256
+		OBJ_mspd = OBJ.max_speed / 256
+		OBJ_acc = OBJ.accel/256
+		OBJ_angle = OBJ.angle * DEG_2_RAD
+		OBJ_v_angle = OBJ.v_angle * DEG_2_RAD
+		OBJ_avel = OBJ.angle_vel * DEG_2_RAD
+
+		OBJ_c_angle = OBJ.c_angle * DEG_2_RAD
+
+		OBJ_tx = OBJ.dest[0]
+		OBJ_ty = OBJ.dest[1]
+
+
+
+		################################################
+		'''
+		draw_line(
+			v_a = (
+				CAM_POS[0] - 10, 
+				CAM_POS[1]
+			),
+			v_b = (
+				CAM_POS[0] + 10,
+				CAM_POS[1]
+			),
+			c_a = (1.0, 1.0, 1.0, 1.0),
+			c_b = (1.0, 1.0, 1.0, 1.0)
+		)
+
+		draw_line(
+			v_a = (
+				CAM_POS[0], 
+				CAM_POS[1] - 10
+			),
+			v_b = (
+				CAM_POS[0],
+				CAM_POS[1] + 10
+			),
+			c_a = (1.0, 1.0, 1.0, 1.0),
+			c_b = (1.0, 1.0, 1.0, 1.0)
+		)
+		'''
+		################################################
+
+
+
+
+		# Target coordinates
+		################################################
+		if BV.SHOW_TARGETS:
+			t_alpha = 0.6
+			t_size = 4
+			# target line
+			draw_line(
+				v_a = (OBJ_x, OBJ_y),
+				v_b = (OBJ_tx, OBJ_ty),
+				c_a = (1.0, 1.0, 1.0, t_alpha),
+				c_b = (1.0, 1.0, 1.0, t_alpha)
+			)
+
+			# target point
+			'''
+			vs = []
+			cs = []
+			num_segs = 12
+
+			for j in range(num_segs+1):
+
+				vs.append((
+					(OBJ_tx + math.cos(j * math.pi * 2 / num_segs) * t_size),
+					(OBJ_ty + math.sin(j * math.pi * 2 / num_segs) * t_size)
+				))
+
+				cs.append((1.0, 1.0, 1.0, t_alpha))
+
+			draw_lines(vs, cs)
+			'''
+			'''
+			draw_line(
+				v_a = (OBJ_tx-t_size, OBJ_ty),
+				v_b = (OBJ_tx+t_size, OBJ_ty),
+				c_a = (1.0, 1.0, 1.0, t_alpha),
+				c_b = (1.0, 1.0, 1.0, t_alpha)
+			)
+
+			draw_line(
+				v_a = (OBJ_tx, OBJ_ty-t_size),
+				v_b = (OBJ_tx, OBJ_ty+t_size),
+				c_a = (1.0, 1.0, 1.0, t_alpha),
+				c_b = (1.0, 1.0, 1.0, t_alpha)
+			)
+			'''
+			
+		################################################
+
+
+
+		# Velocity components
+		################################################
+		if BV.SHOW_VEL_COMPONENTS:
+			# X velocity
+			draw_line(
+				v_a = (OBJ_x, OBJ_y),
+				v_b = (
+					OBJ_x + OBJ_vx * VECTOR_SCALE,
+					OBJ_y
+				),
+				c_a = (1.0, 1.0, 1.0, 1.0),
+				c_b = (0.0, 1.0, 1.0, 1.0)
+			)
+
+
+
+			# Y velocity
+			draw_line(
+				v_a = (OBJ_x, OBJ_y),
+				v_b = (
+					OBJ_x,
+					OBJ_y + OBJ_vy * VECTOR_SCALE
+				),
+				c_a = (1.0, 1.0, 1.0, 1.0),
+				c_b = (0.0, 1.0, 1.0, 1.0)
+			)
+
+			
+		################################################
+
+
+
+
+		# Direction Normalized
+		################################################
+		if BV.SHOW_DIR_NORMALIZED:
+
+			x_norm = - math.sin(OBJ_angle) #OBJ_mspd
+			y_norm = - math.cos(OBJ_angle) #OBJ_mspd
+
+			# Normalized direction
+			draw_line(
+				v_a = (OBJ_x, OBJ_y),
+				v_b = (
+					OBJ_x + x_norm * VECTOR_SCALE * 0.5,
+					OBJ_y + y_norm * VECTOR_SCALE * 0.5
+				),
+				c_a = (1.0, 1.0, 1.0, 1.0),
+				c_b = (0.0, 1.0, 1.0, 1.0)
+			)
+
+		################################################
+
+
+		# Camera
+		################################################
+		if (BV.SHOW_CAMERA_ANGLE or BV.SHOW_CAM) and racer_has_camera(i):
+
+			C = - math.sin(OBJ_c_angle)
+			S = - math.cos(OBJ_c_angle)
+
+			F_x = OBJ_x + C * VECTOR_SCALE
+			F_y = OBJ_y + S * VECTOR_SCALE
+
+
+			if BV.SHOW_CAMERA_ANGLE:
+				# Actual direction
+				draw_line(
+					v_a = (OBJ_x, OBJ_y),
+					v_b = (F_x, F_y),
+					c_a = (0.9, 0.0, 1.0, 1.0),
+					c_b = (0.9, 0.0, 1.0, 1.0)
+				)
+
+
+
+
+			C_W = CAM_WIDTH
+			C_alpha = CAM_LINE_ALPHA
+
+			if not BV.SHOW_CAM: 
+				C_W = 0.5 * VECTOR_SCALE
+				#C_alpha = 1.0
+
+			R_x = OBJ_x  -  C * cam_scl_b * C_SCL  -  S * C_W
+			R_y = OBJ_y  -  S * cam_scl_b * C_SCL  +  C * C_W
+
+			L_x = OBJ_x  -  C * cam_scl_b * C_SCL  +  S * C_W
+			L_y = OBJ_y  -  S * cam_scl_b * C_SCL  -  C * C_W
+
+
+			
+			# Ortho direction
+			draw_line(
+				v_a = (L_x, L_y),
+				v_b = (R_x, R_y),
+				c_a = (0.9, 0.0, 1.0, C_alpha),
+				c_b = (0.9, 0.0, 1.0, C_alpha)
+			)
+
+
+
+
+			if BV.SHOW_CAM:
+				CAM_DIST = 4
+
+				C_x = OBJ_x - C * cam_scl_a * C_SCL
+				C_y = OBJ_y - S * cam_scl_a * C_SCL
+
+				
+				# Camera direction
+				draw_line(
+					v_a = (OBJ_x, OBJ_y),
+					v_b = (C_x, C_y),
+					c_a = (0.9, 0.0, 1.0, CAM_LINE_ALPHA),
+					c_b = (0.9, 0.0, 1.0, CAM_LINE_ALPHA)
+				)
+
+
+				
+				# Cam_line A
+				draw_line(
+					v_a = (C_x, C_y),
+					v_b = (
+						C_x + (L_x - C_x) * CAM_DIST, 
+						C_y + (L_y - C_y) * CAM_DIST
+					),
+					c_a = (1.0, 1.0, 0.0, CAM_LINE_ALPHA),
+					c_b = (1.0, 1.0, 0.0, 0.0)
+				)
+
+
+				# Cam_line B
+				draw_line(
+					v_a = (C_x, C_y),
+					v_b = (
+						C_x + (R_x - C_x) * CAM_DIST, 
+						C_y + (R_y - C_y) * CAM_DIST
+					),
+					c_a = (1.0, 1.0, 0.0, CAM_LINE_ALPHA),
+					c_b = (1.0, 1.0, 0.0, 0.0)
+				)
+
+
+
+
+
+
+
+
+
+		################################################
+
+
+
+
+
+		
+
+
+
+		# Velocity Vector
+		################################################
+		if BV.SHOW_VEL_VECTOR:
+
+			vx = - math.sin(OBJ_v_angle) * OBJ_spd
+			vy = - math.cos(OBJ_v_angle) * OBJ_spd
+
+			# velocity
+			draw_line(
+				v_a = (OBJ_x, OBJ_y),
+				v_b = (
+					OBJ_x + vx * VECTOR_SCALE, 
+					OBJ_y + vy * VECTOR_SCALE
+				),
+				c_a = (1.0, 1.0, 1.0, 1.0),
+				c_b = (0.0, 1.0, 0.2, 1.0)
+			)
+		################################################
+
+
+		
+
+
+
+
+		# Angular Velocity
+		################################################
+		if BV.SHOW_DIR_NORMALIZED and racer_has_camera(i):
+			if OBJ_spd != 0:
+
+				ang = OBJ_c_angle
+				inc_ang = OBJ_avel / A_VEL_SEGMENTS
+
+				if OBJ_avel < -math.pi:
+					inc_ang = (OBJ_avel + math.pi*2) / A_VEL_SEGMENTS
+
+
+
+				vs = []
+				cs = []
+
+				for j in range(A_VEL_SEGMENTS+1): # do first point, and then A_VEL_SEGMENTS new points
+
+					x_norm = - math.sin(ang) #OBJ_mspd
+					y_norm = - math.cos(ang) #OBJ_mspd
+
+					ang += inc_ang
+
+					vs.append((
+						OBJ_x + x_norm * VECTOR_SCALE,
+						OBJ_y + y_norm * VECTOR_SCALE
+					))
+
+					cs.append((1.0, 0.0, 1.0, 1.0))
+
+				# return line
+				draw_line(
+					v_a = (
+						(OBJ_x + vs[-1][0]) / 2, 
+						(OBJ_y + vs[-1][1]) / 2
+					),
+					v_b = vs[-1],
+					c_a = (1.0, 0.0, 1.0, 0.0),
+					c_b = (1.0, 0.0, 1.0, 0.3)
+				)
+
+
+				draw_lines(vs, cs)
+
+
+
+
+		################################################
+
+
+
+
+
+
+	DRAW_LINESET()
+
+
+
+
+
+
+
+def SHOW_WIDTH_2_VECTORS():
+	global ls_vdata
+	global ls_cdata
+	global ls_numl
+
+	LW = max(1, VEC_W * screen.w / MAP_W * (2 / NUM_WIDTHS))
+	glLineWidth(LW)
+
+
+	ls_numl = 0
+	ls_vdata = []
+	ls_cdata = []
+
+	# show velocity data
+	for i in range(7, -1, -1):
+
+		if not is_active_racer(i): continue
+
+		OBJ = OBJECTS[i]
+
+		OBJ_x = OBJ.x
+		OBJ_y = OBJ.y
+		OBJ_vel = OBJ.vel
+		OBJ_vx = OBJ_vel[0]/256
+		OBJ_vy = OBJ_vel[1]/256
+		OBJ_vz = OBJ_vel[2]#/256
+		OBJ_spd = OBJ.speed / 256
+		OBJ_mspd = OBJ.max_speed / 256
+		OBJ_v_angle = OBJ.v_angle * DEG_2_RAD
+		OBJ_angle = OBJ.angle * DEG_2_RAD
+
+
+		
+
+
+
+		
+
+
+
+	DRAW_LINESET()
+
+
+
+
+def SHOW_WIDTH_3_VECTORS():
+	global ls_vdata
+	global ls_cdata
+	global ls_numl
+
+	LW = max(1, VEC_W * screen.w / MAP_W * (3 / NUM_WIDTHS))
+	glLineWidth(LW)
+
+
+	ls_numl = 0
+	ls_vdata = []
+	ls_cdata = []
+
+	# show velocity data
+	for i in range(7, -1, -1):
+
+		if not is_active_racer(i): continue
+
+		OBJ = OBJECTS[i]
+
+		OBJ_x = OBJ.x
+		OBJ_y = OBJ.y
+		OBJ_vel = OBJ.vel
+		OBJ_vx = OBJ_vel[0]/256
+		OBJ_vy = OBJ_vel[1]/256
+		OBJ_vz = OBJ_vel[2]#/256
+		OBJ_spd = OBJ.speed / 256
+		OBJ_mspd = OBJ.max_speed / 256
+		OBJ_v_angle = OBJ.v_angle * DEG_2_RAD
+		OBJ_angle = OBJ.angle * DEG_2_RAD
+		OBJ_acc = OBJ.accel / 256
+
+
+
+
+		
+
+
+
+
+		# Momentum Normalized
+		################################################
+		if BV.SHOW_VEL_NORMALIZED:
+			
+			if OBJ_spd != 0:
+
+				x_norm = - math.sin(OBJ_v_angle) * OBJ_mspd
+				y_norm = - math.cos(OBJ_v_angle) * OBJ_mspd
+
+
+				# Normalized velocity
+				'''
+				ls_vdata.append(OBJ_x)
+				ls_vdata.append(OBJ_y)
+				#---
+				ls_vdata.append(OBJ_x + x_norm * VECTOR_SCALE)
+				ls_vdata.append(OBJ_y + y_norm * VECTOR_SCALE)
+
+
+				# Colors
+				ls_cdata.append(0.0)
+				ls_cdata.append(0.0)
+				ls_cdata.append(0.0)
+				#---
+				ls_cdata.append(0.0)
+				ls_cdata.append(0.0)
+				ls_cdata.append(0.0)
+
+				ls_numl += 1
+				'''
+
+				draw_line(
+					v_a = (OBJ_x, OBJ_y),
+					v_b = (
+						OBJ_x + x_norm * VECTOR_SCALE, 
+						OBJ_y + y_norm * VECTOR_SCALE
+					),
+					c_a = (0.0, 0.0, 0.0, 1.0),
+					c_b = (0.0, 0.0, 0.0, 1.0)
+				)
+		################################################
+
+
+
+		# Acceleration
+		################################################
+		if BV.SHOW_ACCELERATION:
+			
+			if OBJ_acc != 0:
+
+				C = - math.sin(OBJ_v_angle)
+				S = - math.cos(OBJ_v_angle)
+
+				#x_vel = C * OBJ_spd
+				#y_vel = S * OBJ_spd
+
+				x_acc = C * (OBJ_acc * 64)
+				y_acc = S * (OBJ_acc * 64)
+
+
+				# Normalized velocity
+				
+				if OBJ_acc < 0:
+					# Colors
+					COL_A = (0.4, 0.2, 0.2, 1.0)
+					COL_B = (1.0, 0.5, 0.5, 1.0)
+				else:
+					# Colors
+					COL_A = (0.2, 0.4, 0.2, 1.0)
+					COL_B = (0.5, 1.0, 0.5, 1.0)
+
+
+				draw_line(
+					v_a = (OBJ_x, OBJ_y),
+					v_b = (
+						OBJ_x + x_acc * VECTOR_SCALE, 
+						OBJ_y + y_acc * VECTOR_SCALE
+					),
+					c_a = COL_A,
+					c_b = COL_B
+				)
+
+		################################################
+
+
+
+		
+
+
+
+
+
+
+
+	DRAW_LINESET()
+
+
+
+
+
+
+
+
+
+def SHOW_EXTRA_VECTORS():
+	glUseProgram(LINESET_SHADER)
+
+	glUniform1f(lset_S_w, screen.SCALE * screen.DEFAULT_WIDTH / MAP_W)
+	glUniform1f(lset_S_h, screen.SCALE * screen.DEFAULT_HEIGHT / MAP_H)
+	glUniform1f(lset_S_x, screen.x)
+	glUniform1f(lset_S_y, screen.y)
+	glUniform1f(lset_W_w, WINDOW_WIDTH)
+	glUniform1f(lset_W_h, WINDOW_HEIGHT)
+
+	
+
+
+	#SHOW_WIDTH_3_VECTORS()
+
+	#SHOW_WIDTH_2_VECTORS()
+
+	SHOW_WIDTH_1_VECTORS()
+
+
+
+
+
+	glUseProgram(0)
+
+	glLineWidth(1)
+
+
+
+
+
+
 
 
 MAX_SPD = 0x100
@@ -1676,9 +2443,11 @@ def init_pygame():
 	GL_CANVAS = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pg_flags)
 
 	Assets.create_pygame_images()
+	TrackHelper.set_render_quality(zone_scl=ZONE_SCL, flow_scl=FLOW_SCL)
 	
-	TrackHelper.gen_arrow_images()
-	TrackHelper.gen_cp_tiles()
+	# these will get automatically called by set_render_quality since the scales for both will be changed
+	#TrackHelper.gen_arrow_images()
+	#TrackHelper.gen_cp_tiles()
 
 
 	screen = KS.Screen((WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -2844,6 +3613,15 @@ while True:
 													OBJECTS[0].copy_trail(OBJECTS[1])
 
 										BV.P_REPLAY_MODE = BV.REPLAY_MODE
+
+
+
+										#############################################################
+										#  Direction lines for racers
+										#############################################################
+
+										if True:	# later change to "if SHOW_<dir data>:"
+											SHOW_EXTRA_VECTORS()
 										
 
 

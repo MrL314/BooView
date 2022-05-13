@@ -329,6 +329,9 @@ df_hsh = (
 )
 
 
+ZONE_QUALITY = None
+FLOW_QUALITY = None
+
 
 
 def diff_hash(diff_map):
@@ -506,7 +509,7 @@ def gen_cp_tiles():
 			tile = gen_cp_tile(attr, S)
 			PRE_GEN_TILES[attr][diff_hash(S)] = pygame.transform.smoothscale(
 				tile, 								# zone tile
-				(16, 16)							# resize to a "16x16" image
+				(16*ZONE_QUALITY, 16*ZONE_QUALITY)	# resize to a "16x16" image
 			).convert_alpha()
 
 
@@ -534,22 +537,40 @@ def gen_arrow_images():
 		flow_angle = -(360 * i / 255)
 		ROTATED_ARROWS.append(pygame.transform.smoothscale(
 			Assets.rot_image(Assets.ARROW_IMAGE, flow_angle), 	# rotated arrow image
-			(16, 16)											# resize to a "16x16" image
+			(16*FLOW_QUALITY, 16*FLOW_QUALITY)					# resize to a "16x16" image
 		).convert_alpha())
 
 
+
+def set_render_quality(zone_scl=1, flow_scl=1):
+	global ZONE_QUALITY
+	global FLOW_QUALITY
+
+	rerender_zone = False
+	rerender_flow = False
+
+	if zone_scl != ZONE_QUALITY: rerender_zone = True
+	if flow_scl != FLOW_QUALITY: rerender_flow = True
+
+	ZONE_QUALITY = zone_scl
+	FLOW_QUALITY = flow_scl
+
+	if rerender_zone: gen_cp_tiles()
+	if rerender_flow: gen_arrow_images()
 
 
 
 
 def get_cpmap_flowmap_from_data(zone_data, flow_data, cp_attr):
 	global ROTATED_ARROWS
+	global ZONE_QUALITY
+	global FLOW_QUALITY
 	"""Generate the images for the overlay for the cp and flow maps"""
 
 	
 
-	ZONE_MAP = pygame.Surface((1024, 1024), SRCALPHA)	# zone map base surface, SRCALPHA to set as alpha enabled
-	FLOW_MAP = pygame.Surface((1024, 1024), SRCALPHA)	# flow map base surface, SRCALPHA to set as alpha enabled
+	ZONE_MAP = pygame.Surface((1024*ZONE_QUALITY, 1024*ZONE_QUALITY), SRCALPHA)	# zone map base surface, SRCALPHA to set as alpha enabled
+	FLOW_MAP = pygame.Surface((1024*FLOW_QUALITY, 1024*FLOW_QUALITY), SRCALPHA)	# flow map base surface, SRCALPHA to set as alpha enabled
 
 
 	# pad the borders of the cp map in order to handle literal edge cases later
@@ -585,7 +606,7 @@ def get_cpmap_flowmap_from_data(zone_data, flow_data, cp_attr):
 			# blit flow arrow onto map
 			FLOW_MAP.blit(
 				ROTATED_ARROWS[flow_data[y * 64 + x]],			# rotated arrow image
-				(x * 16, y * 16)	# convert tile xy to coordinate xy
+				(x * 16 * FLOW_QUALITY, y * 16 * FLOW_QUALITY)	# convert tile xy to coordinate xy
 			)
 
 			#flow_time += time.perf_counter() - t1
@@ -610,7 +631,7 @@ def get_cpmap_flowmap_from_data(zone_data, flow_data, cp_attr):
 										
 			ZONE_MAP.blit(
 				get_cp_tile(cp_attr[cp_num * 2], diff_map),		# get the cp tile, with borders
-				(x * 16, y * 16)								# convert tile xy to coordinate xy
+				(x * 16 * ZONE_QUALITY, y * 16 * ZONE_QUALITY)	# convert tile xy to coordinate xy
 			)
 			
 
