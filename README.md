@@ -60,7 +60,7 @@ Please read through this README before starting!
 3. Install BizHawk
 4. Download Python **3.8 or higher** from the [Python official download page](https://www.python.org/downloads/) **(NOT the Windows Store!!)**
 5. When installing Python, make sure "Add to PATH" is checked
-6. If using Windows, turn off app execution aliases for Python in `Settings > Apps > Apps & Features > App` execution aliases 
+6. If using Windows, turn off app execution aliases for Python in `Settings > Apps > Apps & Features > App execution aliases` 
    - (https://www.windowscentral.com/how-manage-app-execution-aliases-windows-10)
 7. Download **BooView** and unzip
 8. Run `SETUP.bat`.
