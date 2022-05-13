@@ -35,8 +35,8 @@ Please read through this README before starting!
 - View racer vector data such as facing-direction, momentum, camera direction, etc.
 - View racer target locations on the map
 - View players' viewable area as well as camera object tracking the players!
-- Export map data to rendered images!
 - Increase quality of flow map for crispier displays!
+- Export map data to rendered images! (not fully implemented yet!)
 
 
 ## Requirements: 
